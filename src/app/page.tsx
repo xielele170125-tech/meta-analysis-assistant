@@ -32,7 +32,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet, Code2, TriangleAlert, TrendingUp, Search, GitCompare, Info } from 'lucide-react';
+import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet, Code2, TriangleAlert, TrendingUp, Search, GitCompare, Info, RefreshCw } from 'lucide-react';
 
 // 类型定义
 interface Literature {
@@ -421,6 +421,34 @@ export default function Home() {
       await loadExtractedData();
     } catch (error) {
       console.error('Delete error:', error);
+    }
+  };
+
+  // 重新提取文献数据
+  const reextractLiterature = async (id: string) => {
+    if (!apiKey) {
+      alert('请先设置 DeepSeek API Key');
+      return;
+    }
+    if (!confirm('确定要重新提取这篇文献的数据吗？这将删除已有的提取数据。')) return;
+    
+    try {
+      const res = await fetch('/api/literature/reextract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ literatureId: id, apiKey }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(`重新提取成功，共提取 ${data.data.studiesCount} 条数据`);
+        await loadLiterature();
+        await loadExtractedData();
+      } else {
+        alert('重新提取失败: ' + data.error);
+      }
+    } catch (error) {
+      console.error('Re-extract error:', error);
+      alert('重新提取失败');
     }
   };
 
@@ -922,11 +950,16 @@ export default function Home() {
                             )}
                           </TableCell>
                           <TableCell>
-                            <div className="flex gap-2">
-                              <Button variant="ghost" size="sm" onClick={() => setSelectedLiterature(lit)}>
+                            <div className="flex gap-1">
+                              <Button variant="ghost" size="sm" onClick={() => setSelectedLiterature(lit)} title="查看详情">
                                 <Eye className="h-4 w-4" />
                               </Button>
-                              <Button variant="ghost" size="sm" onClick={() => deleteLiterature(lit.id)}>
+                              {lit.status === 'completed' && (
+                                <Button variant="ghost" size="sm" onClick={() => reextractLiterature(lit.id)} title="重新提取数据">
+                                  <RefreshCw className="h-4 w-4 text-blue-500" />
+                                </Button>
+                              )}
+                              <Button variant="ghost" size="sm" onClick={() => deleteLiterature(lit.id)} title="删除">
                                 <Trash2 className="h-4 w-4 text-red-500" />
                               </Button>
                             </div>

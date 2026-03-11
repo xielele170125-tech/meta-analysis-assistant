@@ -1,0 +1,437 @@
+import { NextRequest, NextResponse } from 'next/server';
+import OpenAI from 'openai';
+import { getSupabaseClient } from '@/storage/database/supabase-client';
+
+// DeepSeek 数据提取提示词 - 优化版（含结局指标标准化和亚组识别）
+const EXTRACTION_PROMPT = `你是一位专业的Meta分析数据提取专家。请从以下文献内容中仔细提取Meta分析所需的数据。
+
+## 重要说明
+请**严格按照文献原文**提取数据，保留原始的指标名称和数值。如果文献中有表格，请仔细阅读表格的行列标题。
+
+## 数据提取指南
+
+### 1. 研究标识
+- 研究名称：通常是"第一作者(年份)"格式
+
+### 2. 样本量（必填）
+请提取以下信息，并**保留原始名称**：
+- 治疗组/实验组样本量及名称：例如"胚胎总数"、"周期数"、"患者数"等
+- 对照组样本量及名称
+
+### 3. 数据类型判断
+根据文献报告的数据类型，选择合适的提取方式：
+
+#### 类型A：连续型变量（均值±标准差）
+提取：
+- 治疗组均值、标准差
+- 对照组均值、标准差
+- 注意单位是否一致
+
+#### 类型B：二分类变量（事件数/总数）
+提取：
+- 治疗组事件数及事件名称（如"非整倍体胚胎数"、"妊娠数"等）
+- 对照组事件数及事件名称
+- 样本量名称（如"胚胎总数"、"周期总数"等）
+
+#### 类型C：已计算的效应量
+如果文献直接报告了：
+- OR值/RR值/HR值及其95%CI
+- 均值差及其95%CI
+- 请在notes中说明
+
+### 4. 结局指标处理（重要！）
+
+#### 4.1 结局指标标准化
+不同文献可能用不同名称表示相同含义的指标，请进行标准化：
+
+**标准化对照表：**
+| 原始名称可能的形式 | 标准化名称 |
+|------------------|-----------|
+| 非整倍体率、染色体异常率、非整倍体发生率、aneuploidy rate | 非整倍体率 |
+| 临床妊娠率、妊娠率、clinical pregnancy rate | 临床妊娠率 |
+| 生化妊娠率、生化率 | 生化妊娠率 |
+| 流产率、自然流产率 | 流产率 |
+| 活产率、活产成功率 | 活产率 |
+| 种植率、着床率、implantation rate | 种植率 |
+| 卵裂率、分裂率 | 卵裂率 |
+| 受精率、正常受精率 | 受精率 |
+| 优胚率、优质胚胎率 | 优胚率 |
+| 囊胚形成率、囊胚率 | 囊胚形成率 |
+
+- 请保留原始名称（outcome_type_raw）
+- 同时提供标准化名称（outcome_type_standardized）
+- 如果不在上述对照表中，请根据含义自行标准化
+
+#### 4.2 亚组识别（非常重要！）
+如果同一文献报告了多个相同结局指标但针对不同人群/分组，请识别亚组：
+
+**常见亚组类型：**
+- 年龄分组：高龄组(≥35岁) vs 年轻组(<35岁)
+- 周期类型：首次周期 vs 重复周期
+- 胚胎类型：囊胚 vs 卵裂胚
+- 卵子来源：自卵 vs 供卵
+- 精子来源：自精 vs 供精
+- 其他特定分组
+
+**亚组识别要点：**
+1. 仔细阅读文献中的表格标题和分组说明
+2. 如果表格按年龄、周期类型等分层，每个分层应单独提取
+3. 亚组名称使用简洁的标签（如"高龄组"、"年轻组"）
+4. 亚组详细描述应包含具体的定义（如"女性年龄≥35岁"）
+
+### 5. 数据提取注意事项
+- 如果文献包含多个不同的结局指标，请分别提取
+- 如果文献包含同一指标的不同亚组，也要分别提取并标注亚组信息
+- 如果表格中数据缺失，填null并在notes中说明
+- 注意区分"干预组"和"对照组"，不要搞反
+- 对于比率数据，样本量是分母，事件数是分子
+
+## JSON输出格式
+请严格按照以下格式输出：
+
+\`\`\`json
+{
+  "studies": [
+    {
+      "study_name": "作者(年份)",
+      "sample_size_treatment": 数字,
+      "sample_size_treatment_name": "样本量名称，如'胚胎总数'",
+      "sample_size_control": 数字,
+      "sample_size_control_name": "样本量名称",
+      "mean_treatment": 数字或null,
+      "sd_treatment": 数字或null,
+      "mean_control": 数字或null,
+      "sd_control": 数字或null,
+      "events_treatment": 数字或null,
+      "events_treatment_name": "事件名称，如'非整倍体胚胎数'",
+      "events_control": 数字或null,
+      "events_control_name": "事件名称",
+      "outcome_type": "结局指标名称（标准化后的名称）",
+      "outcome_type_raw": "原始结局指标名称",
+      "outcome_type_standardized": "标准化后的结局指标名称",
+      "subgroup": "亚组名称，如'高龄组'，无亚组则填null",
+      "subgroup_detail": "亚组详细描述，如'女性年龄≥35岁'",
+      "confidence": 0.0-1.0,
+      "notes": "任何需要说明的问题"
+    }
+  ]
+}
+\`\`\`
+
+## 示例
+
+### 示例1：简单情况
+表格显示：
+| 组别 | 胚胎总数 | 非整倍体胚胎数 | 非整倍体率 |
+|------|---------|---------------|-----------|
+| PGT-A组 | 156 | 23 | 14.7% |
+| 对照组 | 189 | 52 | 27.5% |
+
+提取为：
+\`\`\`json
+{
+  "studies": [{
+    "study_name": "作者(年份)",
+    "sample_size_treatment": 156,
+    "sample_size_treatment_name": "胚胎总数",
+    "sample_size_control": 189,
+    "sample_size_control_name": "胚胎总数",
+    "events_treatment": 23,
+    "events_treatment_name": "非整倍体胚胎数",
+    "events_control": 52,
+    "events_control_name": "非整倍体胚胎数",
+    "outcome_type": "非整倍体率",
+    "outcome_type_raw": "非整倍体率",
+    "outcome_type_standardized": "非整倍体率",
+    "subgroup": null,
+    "subgroup_detail": null,
+    "confidence": 0.95
+  }]
+}
+\`\`\`
+
+### 示例2：含亚组的情况
+表格显示不同年龄组的临床妊娠率：
+| 组别 | 高龄组(≥35岁)周期数 | 高龄组妊娠数 | 高龄组妊娠率 | 年轻组(<35岁)周期数 | 年轻组妊娠数 | 年轻组妊娠率 |
+|------|-------------------|------------|------------|-------------------|------------|------------|
+| PGT-A组 | 45 | 18 | 40.0% | 82 | 42 | 51.2% |
+| 对照组 | 52 | 12 | 23.1% | 78 | 28 | 35.9% |
+
+应提取为两项：
+\`\`\`json
+{
+  "studies": [
+    {
+      "study_name": "作者(年份)",
+      "sample_size_treatment": 45,
+      "sample_size_treatment_name": "周期数",
+      "sample_size_control": 52,
+      "sample_size_control_name": "周期数",
+      "events_treatment": 18,
+      "events_treatment_name": "妊娠数",
+      "events_control": 12,
+      "events_control_name": "妊娠数",
+      "outcome_type": "临床妊娠率",
+      "outcome_type_raw": "临床妊娠率",
+      "outcome_type_standardized": "临床妊娠率",
+      "subgroup": "高龄组",
+      "subgroup_detail": "女性年龄≥35岁",
+      "confidence": 0.90
+    },
+    {
+      "study_name": "作者(年份)",
+      "sample_size_treatment": 82,
+      "sample_size_treatment_name": "周期数",
+      "sample_size_control": 78,
+      "sample_size_control_name": "周期数",
+      "events_treatment": 42,
+      "events_treatment_name": "妊娠数",
+      "events_control": 28,
+      "events_control_name": "妊娠数",
+      "outcome_type": "临床妊娠率",
+      "outcome_type_raw": "临床妊娠率",
+      "outcome_type_standardized": "临床妊娠率",
+      "subgroup": "年轻组",
+      "subgroup_detail": "女性年龄<35岁",
+      "confidence": 0.90
+    }
+  ]
+}
+\`\`\`
+
+请开始提取以下文献：
+
+---
+文献内容：
+`;
+
+/**
+ * 重新提取文献数据
+ * POST /api/literature/reextract
+ * Body: { literatureId, apiKey }
+ */
+export async function POST(request: NextRequest) {
+  try {
+    const { literatureId, apiKey } = await request.json();
+
+    if (!literatureId || !apiKey) {
+      return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
+    }
+
+    const client = getSupabaseClient();
+
+    // 获取文献信息
+    const { data: literature, error: litError } = await client
+      .from('literature')
+      .select('*')
+      .eq('id', literatureId)
+      .single();
+
+    if (litError || !literature) {
+      return NextResponse.json({ error: '文献不存在' }, { status: 404 });
+    }
+
+    if (!literature.raw_content) {
+      return NextResponse.json({ error: '文献内容为空，请重新上传' }, { status: 400 });
+    }
+
+    // 更新状态为提取中
+    await client
+      .from('literature')
+      .update({ status: 'extracting' })
+      .eq('id', literatureId);
+
+    // 删除旧的提取数据
+    await client.from('extracted_data').delete().eq('literature_id', literatureId);
+
+    try {
+      // 调用 DeepSeek API 提取数据
+      const openai = new OpenAI({
+        apiKey: apiKey,
+        baseURL: 'https://api.deepseek.com',
+      });
+
+      const response = await openai.chat.completions.create({
+        model: 'deepseek-reasoner',
+        messages: [
+          {
+            role: 'user',
+            content: EXTRACTION_PROMPT + literature.raw_content,
+          },
+        ],
+        max_tokens: 8000,
+      });
+
+      const content = response.choices[0]?.message?.content || '';
+      
+      // 解析 JSON
+      const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/);
+      if (!jsonMatch) {
+        throw new Error('无法从响应中提取 JSON 数据');
+      }
+
+      const parsed = JSON.parse(jsonMatch[1]);
+      const studies = parsed.studies || [];
+
+      // 处理每条数据
+      interface ExtractedStudy {
+        study_name: string | null;
+        sample_size_treatment: number | null;
+        sample_size_treatment_name: string | null;
+        sample_size_control: number | null;
+        sample_size_control_name: string | null;
+        mean_treatment: number | null;
+        mean_control: number | null;
+        sd_treatment: number | null;
+        sd_control: number | null;
+        events_treatment: number | null;
+        events_treatment_name: string | null;
+        events_control: number | null;
+        events_control_name: string | null;
+        outcome_type: string | null;
+        outcome_type_raw: string | null;
+        outcome_type_standardized: string | null;
+        subgroup: string | null;
+        subgroup_detail: string | null;
+        confidence: number;
+        notes: string | null;
+      }
+
+      const processedStudies: ExtractedStudy[] = studies.map((study: ExtractedStudy) => {
+        const processed: ExtractedStudy = { ...study };
+
+        // 连续型变量：计算 SMD
+        if (
+          study.mean_treatment !== null &&
+          study.sd_treatment !== null &&
+          study.mean_control !== null &&
+          study.sd_control !== null &&
+          study.sample_size_treatment &&
+          study.sample_size_control
+        ) {
+          const n1 = study.sample_size_treatment;
+          const n2 = study.sample_size_control;
+          const m1 = study.mean_treatment;
+          const m2 = study.mean_control;
+          const s1 = study.sd_treatment;
+          const s2 = study.sd_control;
+
+          const pooledSD = Math.sqrt(
+            ((n1 - 1) * s1 * s1 + (n2 - 1) * s2 * s2) / (n1 + n2 - 2)
+          );
+          const smd = (m1 - m2) / pooledSD;
+          const se = Math.sqrt((n1 + n2) / (n1 * n2) + smd * smd / (2 * (n1 + n2)));
+          const z = 1.96;
+          const ciLower = smd - z * se;
+          const ciUpper = smd + z * se;
+
+          (processed as any).effect_size = smd;
+          (processed as any).standard_error = se;
+          (processed as any).ci_lower = ciLower;
+          (processed as any).ci_upper = ciUpper;
+        }
+
+        // 二分类变量：计算 Log Odds Ratio 和标准误
+        if (
+          study.events_treatment !== null &&
+          study.events_control !== null &&
+          study.sample_size_treatment &&
+          study.sample_size_control
+        ) {
+          const a = study.events_treatment;
+          const b = study.sample_size_treatment - a;
+          const c = study.events_control;
+          const d = study.sample_size_control - c;
+
+          const correction = (a === 0 || b === 0 || c === 0 || d === 0) ? 0.5 : 0;
+          const aAdj = a + correction;
+          const bAdj = b + correction;
+          const cAdj = c + correction;
+          const dAdj = d + correction;
+
+          const logOR = Math.log((aAdj * dAdj) / (bAdj * cAdj));
+          const se = Math.sqrt(1/aAdj + 1/bAdj + 1/cAdj + 1/dAdj);
+          const z = 1.96;
+          const ciLower = logOR - z * se;
+          const ciUpper = logOR + z * se;
+
+          if (!(processed as any).effect_size) {
+            (processed as any).effect_size = logOR;
+            (processed as any).standard_error = se;
+            (processed as any).ci_lower = ciLower;
+            (processed as any).ci_upper = ciUpper;
+          }
+        }
+
+        return processed;
+      });
+
+      // 保存提取的数据
+      if (processedStudies.length > 0) {
+        const dataToInsert = processedStudies.map((study) => ({
+          literature_id: literatureId,
+          study_name: study.study_name,
+          sample_size_treatment: study.sample_size_treatment,
+          sample_size_treatment_name: study.sample_size_treatment_name,
+          sample_size_control: study.sample_size_control,
+          sample_size_control_name: study.sample_size_control_name,
+          mean_treatment: study.mean_treatment,
+          mean_control: study.mean_control,
+          sd_treatment: study.sd_treatment,
+          sd_control: study.sd_control,
+          events_treatment: study.events_treatment,
+          events_treatment_name: study.events_treatment_name,
+          events_control: study.events_control,
+          events_control_name: study.events_control_name,
+          effect_size: (study as any).effect_size,
+          standard_error: (study as any).standard_error,
+          ci_lower: (study as any).ci_lower,
+          ci_upper: (study as any).ci_upper,
+          outcome_type: study.outcome_type_standardized || study.outcome_type,
+          outcome_type_raw: study.outcome_type_raw || study.outcome_type,
+          outcome_type_standardized: study.outcome_type_standardized || study.outcome_type,
+          subgroup: study.subgroup,
+          subgroup_detail: study.subgroup_detail,
+          confidence: study.confidence,
+          notes: study.notes,
+        }));
+
+        await client.from('extracted_data').insert(dataToInsert);
+      }
+
+      // 更新状态为完成
+      await client
+        .from('literature')
+        .update({
+          status: 'completed',
+          error_message: null,
+        })
+        .eq('id', literatureId);
+
+      return NextResponse.json({
+        success: true,
+        data: {
+          literatureId,
+          studiesCount: processedStudies.length,
+          reasoning: (response as any).reasoning_content || null,
+        },
+      });
+    } catch (extractError) {
+      console.error('Extract error:', extractError);
+      await client
+        .from('literature')
+        .update({
+          status: 'error',
+          error_message: extractError instanceof Error ? extractError.message : '数据提取失败',
+        })
+        .eq('id', literatureId);
+      return NextResponse.json({ error: '数据提取失败: ' + (extractError instanceof Error ? extractError.message : '未知错误') }, { status: 500 });
+    }
+  } catch (error) {
+    console.error('Re-extract error:', error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : '处理失败' },
+      { status: 500 }
+    );
+  }
+}
