@@ -53,7 +53,9 @@ interface ExtractedStudy {
   literature_id: string;
   study_name: string | null;
   sample_size_treatment: number | null;
+  sample_size_treatment_name: string | null;
   sample_size_control: number | null;
+  sample_size_control_name: string | null;
   mean_treatment: number | null;
   mean_control: number | null;
   sd_treatment: number | null;
@@ -62,8 +64,13 @@ interface ExtractedStudy {
   standard_error: number | null;
   ci_lower: number | null;
   ci_upper: number | null;
+  events_treatment: number | null;
+  events_treatment_name: string | null;
+  events_control: number | null;
+  events_control_name: string | null;
   outcome_type: string | null;
   confidence: number | null;
+  notes: string | null;
 }
 
 interface MetaAnalysisResult {
@@ -838,9 +845,11 @@ export default function Home() {
                         <TableRow>
                           <TableHead className="w-12">选择</TableHead>
                           <TableHead>研究名称</TableHead>
-                          <TableHead>样本量(T/C)</TableHead>
-                          <TableHead>效应量(SMD)</TableHead>
+                          <TableHead>样本量 (治疗组/对照组)</TableHead>
+                          <TableHead>事件数 (治疗组/对照组)</TableHead>
+                          <TableHead>效应量</TableHead>
                           <TableHead>95% CI</TableHead>
+                          <TableHead>结局指标</TableHead>
                           <TableHead>置信度</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -851,9 +860,29 @@ export default function Home() {
                               <input type="checkbox" checked={selectedStudies.includes(study.id)} onChange={() => toggleStudySelection(study.id)} className="h-4 w-4" />
                             </TableCell>
                             <TableCell className="font-medium">{study.study_name || '未命名'}</TableCell>
-                            <TableCell>{study.sample_size_treatment && study.sample_size_control ? `${study.sample_size_treatment}/${study.sample_size_control}` : '-'}</TableCell>
+                            <TableCell>
+                              {study.sample_size_treatment && study.sample_size_control ? (
+                                <div className="text-sm">
+                                  <span className="font-medium">{study.sample_size_treatment}/{study.sample_size_control}</span>
+                                  {study.sample_size_treatment_name && (
+                                    <div className="text-xs text-slate-500">{study.sample_size_treatment_name}</div>
+                                  )}
+                                </div>
+                              ) : '-'}
+                            </TableCell>
+                            <TableCell>
+                              {study.events_treatment !== null && study.events_control !== null ? (
+                                <div className="text-sm">
+                                  <span className="font-medium">{study.events_treatment}/{study.events_control}</span>
+                                  {study.events_treatment_name && (
+                                    <div className="text-xs text-slate-500">{study.events_treatment_name}</div>
+                                  )}
+                                </div>
+                              ) : '-'}
+                            </TableCell>
                             <TableCell>{study.effect_size !== null ? study.effect_size.toFixed(3) : '-'}</TableCell>
                             <TableCell>{study.ci_lower !== null && study.ci_upper !== null ? `[${study.ci_lower.toFixed(3)}, ${study.ci_upper.toFixed(3)}]` : '-'}</TableCell>
+                            <TableCell className="max-w-[150px] truncate" title={study.outcome_type || ''}>{study.outcome_type || '-'}</TableCell>
                             <TableCell>{study.confidence !== null ? `${(study.confidence * 100).toFixed(0)}%` : '-'}</TableCell>
                           </TableRow>
                         ))}

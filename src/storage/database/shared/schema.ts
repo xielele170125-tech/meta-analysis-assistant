@@ -58,6 +58,9 @@ export const extractedData = pgTable(
     // 连续型变量
     sampleSizeTreatment: integer("sample_size_treatment"),
     sampleSizeControl: integer("sample_size_control"),
+    // 样本量名称（保留原始描述，如"非整倍体数/胚胎总个数"）
+    sampleSizeTreatmentName: varchar("sample_size_treatment_name", { length: 255 }),
+    sampleSizeControlName: varchar("sample_size_control_name", { length: 255 }),
     meanTreatment: real("mean_treatment"),
     meanControl: real("mean_control"),
     sdTreatment: real("sd_treatment"),
@@ -70,6 +73,9 @@ export const extractedData = pgTable(
     // 二分类变量
     eventsTreatment: integer("events_treatment"),
     eventsControl: integer("events_control"),
+    // 事件名称（保留原始描述，如"非整倍体胚胎数"）
+    eventsTreatmentName: varchar("events_treatment_name", { length: 255 }),
+    eventsControlName: varchar("events_control_name", { length: 255 }),
     // 元信息
     outcomeType: varchar("outcome_type", { length: 100 }), // 结局类型
     notes: text("notes"),

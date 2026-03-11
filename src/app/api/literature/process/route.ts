@@ -3,54 +3,109 @@ import OpenAI from 'openai';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { FetchClient, Config, HeaderUtils } from 'coze-coding-dev-sdk';
 
-// DeepSeek 数据提取提示词
-const EXTRACTION_PROMPT = `你是一位专业的Meta分析数据提取专家。请从以下文献内容中提取Meta分析所需的数据。
+// DeepSeek 数据提取提示词 - 优化版
+const EXTRACTION_PROMPT = `你是一位专业的Meta分析数据提取专家。请从以下文献内容中仔细提取Meta分析所需的数据。
 
-请仔细阅读文献，提取以下信息（如果文献中包含多个研究，请分别提取）：
+## 重要说明
+请**严格按照文献原文**提取数据，保留原始的指标名称和数值。如果文献中有表格，请仔细阅读表格的行列标题。
 
-1. **研究名称/标识**：通常是作者名+年份
-2. **样本量**：
-   - 治疗组样本量 (n_treatment)
-   - 对照组样本量 (n_control)
-3. **连续型结局指标**（如果适用）：
-   - 治疗组均值 (mean_treatment)
-   - 治疗组标准差 (sd_treatment)
-   - 对照组均值 (mean_control)
-   - 对照组标准差 (sd_control)
-4. **二分类结局指标**（如果适用）：
-   - 治疗组事件数 (events_treatment)
-   - 对照组事件数 (events_control)
-5. **结局类型**：主要结局还是次要结局
-6. **置信度评分**：你对提取结果的确信程度 (0-1)
+## 数据提取指南
 
-请以JSON格式返回提取的数据，格式如下：
+### 1. 研究标识
+- 研究名称：通常是"第一作者(年份)"格式
+
+### 2. 样本量（必填）
+请提取以下信息，并**保留原始名称**：
+- 治疗组/实验组样本量及名称：例如"胚胎总数"、"周期数"、"患者数"等
+- 对照组样本量及名称
+
+### 3. 数据类型判断
+根据文献报告的数据类型，选择合适的提取方式：
+
+#### 类型A：连续型变量（均值±标准差）
+提取：
+- 治疗组均值、标准差
+- 对照组均值、标准差
+- 注意单位是否一致
+
+#### 类型B：二分类变量（事件数/总数）
+提取：
+- 治疗组事件数及事件名称（如"非整倍体胚胎数"、"妊娠数"等）
+- 对照组事件数及事件名称
+- 样本量名称（如"胚胎总数"、"周期总数"等）
+
+#### 类型C：已计算的效应量
+如果文献直接报告了：
+- OR值/RR值/HR值及其95%CI
+- 均值差及其95%CI
+- 请在notes中说明
+
+### 4. 结局指标
+- 明确标注是什么结局指标（如"非整倍体率"、"临床妊娠率"等）
+
+### 5. 数据提取注意事项
+- 如果文献包含多个不同的结局指标，请分别提取
+- 如果表格中数据缺失，填null并在notes中说明
+- 注意区分"干预组"和"对照组"，不要搞反
+- 对于比率数据，样本量是分母，事件数是分子
+
+## JSON输出格式
+请严格按照以下格式输出：
+
+\`\`\`json
 {
   "studies": [
     {
       "study_name": "作者(年份)",
       "sample_size_treatment": 数字,
+      "sample_size_treatment_name": "样本量名称，如'胚胎总数'",
       "sample_size_control": 数字,
+      "sample_size_control_name": "样本量名称",
       "mean_treatment": 数字或null,
       "sd_treatment": 数字或null,
       "mean_control": 数字或null,
       "sd_control": 数字或null,
       "events_treatment": 数字或null,
+      "events_treatment_name": "事件名称，如'非整倍体胚胎数'",
       "events_control": 数字或null,
-      "outcome_type": "结局描述",
+      "events_control_name": "事件名称",
+      "outcome_type": "结局指标名称，如'非整倍体率'",
       "confidence": 0.0-1.0,
-      "notes": "任何需要注意的问题"
+      "notes": "任何需要说明的问题，如数据缺失、单位转换等"
     }
   ]
 }
+\`\`\`
 
-如果文献中包含多个不同的结局指标，请在studies数组中分别列出。
+## 示例
+如果表格显示：
+| 组别 | 胚胎总数 | 非整倍体胚胎数 | 非整倍体率 |
+|------|---------|---------------|-----------|
+| PGT-A组 | 156 | 23 | 14.7% |
+| 对照组 | 189 | 52 | 27.5% |
 
-重要提示：
-- 只提取明确报告的数据，不要推测或计算
-- 如果数据不完整，请如实记录并说明
-- 注意区分干预组和对照组
-- 对于表格中的数据，请仔细核对行列对应关系
+应提取为：
+\`\`\`json
+{
+  "studies": [{
+    "study_name": "作者(年份)",
+    "sample_size_treatment": 156,
+    "sample_size_treatment_name": "胚胎总数",
+    "sample_size_control": 189,
+    "sample_size_control_name": "胚胎总数",
+    "events_treatment": 23,
+    "events_treatment_name": "非整倍体胚胎数",
+    "events_control": 52,
+    "events_control_name": "非整倍体胚胎数",
+    "outcome_type": "非整倍体率",
+    "confidence": 0.95
+  }]
+}
+\`\`\`
 
+请开始提取以下文献：
+
+---
 文献内容：
 `;
 
@@ -156,13 +211,17 @@ export async function POST(request: NextRequest) {
       let extractedStudies: Array<{
         study_name: string;
         sample_size_treatment: number | null;
+        sample_size_treatment_name: string | null;
         sample_size_control: number | null;
+        sample_size_control_name: string | null;
         mean_treatment: number | null;
         sd_treatment: number | null;
         mean_control: number | null;
         sd_control: number | null;
         events_treatment: number | null;
+        events_treatment_name: string | null;
         events_control: number | null;
+        events_control_name: string | null;
         outcome_type: string | null;
         confidence: number;
         notes: string | null;
@@ -182,6 +241,7 @@ export async function POST(request: NextRequest) {
       const processedStudies = extractedStudies.map((study) => {
         const processed: Record<string, unknown> = { ...study };
 
+        // 连续型变量：计算标准化均数差 (SMD) 和标准误
         if (
           study.mean_treatment !== null &&
           study.sd_treatment !== null &&
@@ -213,6 +273,43 @@ export async function POST(request: NextRequest) {
           processed.ci_upper = ciUpper;
         }
 
+        // 二分类变量：计算 Log Odds Ratio 和标准误
+        if (
+          study.events_treatment !== null &&
+          study.events_control !== null &&
+          study.sample_size_treatment &&
+          study.sample_size_control
+        ) {
+          const a = study.events_treatment; // 治疗组事件数
+          const b = study.sample_size_treatment - a; // 治疗组非事件数
+          const c = study.events_control; // 对照组事件数
+          const d = study.sample_size_control - c; // 对照组非事件数
+
+          // 添加0.5连续性校正（如果有零单元格）
+          const correction = (a === 0 || b === 0 || c === 0 || d === 0) ? 0.5 : 0;
+          const aAdj = a + correction;
+          const bAdj = b + correction;
+          const cAdj = c + correction;
+          const dAdj = d + correction;
+
+          // Log Odds Ratio
+          const logOR = Math.log((aAdj * dAdj) / (bAdj * cAdj));
+          // 标准误
+          const se = Math.sqrt(1/aAdj + 1/bAdj + 1/cAdj + 1/dAdj);
+          // 95% CI
+          const z = 1.96;
+          const ciLower = logOR - z * se;
+          const ciUpper = logOR + z * se;
+
+          // 如果之前没有连续型数据的效应量，使用OR
+          if (!processed.effect_size) {
+            processed.effect_size = logOR;
+            processed.standard_error = se;
+            processed.ci_lower = ciLower;
+            processed.ci_upper = ciUpper;
+          }
+        }
+
         return processed;
       });
 
@@ -222,13 +319,17 @@ export async function POST(request: NextRequest) {
           literature_id: literatureId,
           study_name: study.study_name,
           sample_size_treatment: study.sample_size_treatment,
+          sample_size_treatment_name: study.sample_size_treatment_name,
           sample_size_control: study.sample_size_control,
+          sample_size_control_name: study.sample_size_control_name,
           mean_treatment: study.mean_treatment,
           mean_control: study.mean_control,
           sd_treatment: study.sd_treatment,
           sd_control: study.sd_control,
           events_treatment: study.events_treatment,
+          events_treatment_name: study.events_treatment_name,
           events_control: study.events_control,
+          events_control_name: study.events_control_name,
           effect_size: study.effect_size,
           standard_error: study.standard_error,
           ci_lower: study.ci_lower,
