@@ -548,11 +548,17 @@ export default function Home() {
 
     const selectedData = extractedStudies.filter(s => compareStudies.includes(s.id));
     
-    // 检查是否为同一结局指标
+    // 检查结局指标一致性（改为警示而非阻止）
     const outcomeTypes = new Set(selectedData.map(s => s.outcome_type).filter(Boolean));
+    const outcomeTypeList = Array.from(outcomeTypes);
+    
+    // 如果结局指标不一致，显示警告但允许继续
     if (outcomeTypes.size > 1) {
-      alert('选择的研究的结局指标不一致，请选择相同结局指标的研究');
-      return;
+      const warningMessage = `⚠️ 注意：选择的研究包含 ${outcomeTypes.size} 种不同的结局指标：\n\n${outcomeTypeList.map(t => `• ${t}`).join('\n')}\n\n不同结局指标可能代表不同的临床意义，合并分析需谨慎。\n\n常见可合并的情况：\n• "Live Birth Rate (per transfer)" 和 "Live Birth Rate (per retrieval)" 可以一起分析\n• 相似但命名不同的指标（如"妊娠率"和"临床妊娠率"）\n\n是否继续进行对比分析？`;
+      
+      if (!confirm(warningMessage)) {
+        return;
+      }
     }
 
     // 计算汇总统计
@@ -580,7 +586,9 @@ export default function Home() {
     }
 
     setCompareResult({
-      outcomeType: selectedData[0]?.outcome_type || '未知',
+      outcomeType: outcomeTypes.size > 1 
+        ? `${outcomeTypeList.length} 种结局指标 (混合分析)` 
+        : (selectedData[0]?.outcome_type || '未知'),
       studies: selectedData,
       stats: {
         totalSample: totalSampleTreatment + totalSampleControl,
@@ -597,6 +605,19 @@ export default function Home() {
     if (compareStudies.length < 2) {
       alert('请至少选择2项研究');
       return;
+    }
+    
+    // 检查结局指标一致性
+    const selectedData = extractedStudies.filter(s => compareStudies.includes(s.id));
+    const outcomeTypes = new Set(selectedData.map(s => s.outcome_type).filter(Boolean));
+    
+    if (outcomeTypes.size > 1) {
+      const outcomeTypeList = Array.from(outcomeTypes);
+      const warningMessage = `⚠️ 注意：选择的研究包含 ${outcomeTypes.size} 种不同的结局指标：\n\n${outcomeTypeList.map(t => `• ${t}`).join('\n')}\n\n不同结局指标可能代表不同的临床意义，合并分析需谨慎。\n\n是否继续创建Meta分析？`;
+      
+      if (!confirm(warningMessage)) {
+        return;
+      }
     }
     
     // 设置选中的研究并跳转到数据提取Tab
@@ -1311,11 +1332,32 @@ export default function Home() {
                     </DialogTitle>
                     <DialogDescription>
                       结局指标: {compareResult?.outcomeType}
+                      {compareResult?.outcomeType?.includes('混合分析') && (
+                        <span className="ml-2 text-amber-500">⚠️ 请谨慎解读结果</span>
+                      )}
                     </DialogDescription>
                   </DialogHeader>
                   
                   {compareResult && (
                     <div className="space-y-6">
+                      {/* 混合分析警告 */}
+                      {compareResult.outcomeType.includes('混合分析') && (
+                        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+                          <div className="flex items-start gap-3">
+                            <TriangleAlert className="h-5 w-5 text-amber-500 mt-0.5" />
+                            <div className="text-sm">
+                              <div className="font-medium text-amber-800 dark:text-amber-200">混合结局指标分析</div>
+                              <div className="text-amber-700 dark:text-amber-300 mt-1">
+                                当前分析包含多种结局指标，合并效应量可能缺乏临床意义。建议在解释结果时考虑不同指标的差异。
+                              </div>
+                              <div className="text-amber-600 dark:text-amber-400 mt-2 text-xs">
+                                包含的结局指标：{Array.from(new Set(compareResult.studies.map(s => s.outcome_type).filter(Boolean))).join('、')}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      
                       {/* 汇总统计 */}
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <Card className="p-4">
