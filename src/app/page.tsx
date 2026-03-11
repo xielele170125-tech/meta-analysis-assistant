@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useId } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -994,6 +994,7 @@ function ForestPlot({ data }: { data: Array<{ id: string; studyName: string; eff
 // 漏斗图组件
 function FunnelPlotDisplay({ data }: { data: FunnelPlotResult }) {
   const { studies, pooledEffect, asymmetryTest, heterogeneity } = data;
+  const gridId = useId(); // 生成唯一的 grid ID
   
   // 计算图形范围
   const allEffects = studies.map(s => s.effectSize);
@@ -1031,11 +1032,11 @@ function FunnelPlotDisplay({ data }: { data: FunnelPlotResult }) {
         <svg width={width} height={height} className="border rounded-lg bg-white">
           {/* 背景网格 */}
           <defs>
-            <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">
+            <pattern id={gridId} width="50" height="50" patternUnits="userSpaceOnUse">
               <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#e5e7eb" strokeWidth="0.5"/>
             </pattern>
           </defs>
-          <rect x={margin.left} y={margin.top} width={plotWidth} height={plotHeight} fill="url(#grid)" />
+          <rect x={margin.left} y={margin.top} width={plotWidth} height={plotHeight} fill={`url(#${gridId})`} />
           
           {/* 漏斗形状 (95% CI区域) */}
           <path
