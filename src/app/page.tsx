@@ -32,7 +32,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet, Code2, TriangleAlert, TrendingUp } from 'lucide-react';
+import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet, Code2, TriangleAlert, TrendingUp, Search, GitCompare, Info } from 'lucide-react';
 
 // 类型定义
 interface Literature {
@@ -183,6 +183,22 @@ export default function Home() {
   const [exportingExcel, setExportingExcel] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [processingCount, setProcessingCount] = useState(0);
+  
+  // 数据搜索和对比相关状态
+  const [searchKeyword, setSearchKeyword] = useState('');
+  const [searchOutcomeType, setSearchOutcomeType] = useState('');
+  const [compareStudies, setCompareStudies] = useState<string[]>([]);
+  const [compareResult, setCompareResult] = useState<{
+    outcomeType: string;
+    studies: ExtractedStudy[];
+    stats: {
+      totalSample: number;
+      totalEvents: number;
+      pooledRate: number;
+      heterogeneityI2: number;
+    } | null;
+  } | null>(null);
+  const [showCompare, setShowCompare] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -448,6 +464,99 @@ export default function Home() {
     );
   };
 
+  // 数据搜索功能
+  const filteredStudies = extractedStudies.filter(study => {
+    const keywordMatch = !searchKeyword || 
+      study.study_name?.toLowerCase().includes(searchKeyword.toLowerCase()) ||
+      study.outcome_type?.toLowerCase().includes(searchKeyword.toLowerCase()) ||
+      study.sample_size_treatment_name?.toLowerCase().includes(searchKeyword.toLowerCase()) ||
+      study.events_treatment_name?.toLowerCase().includes(searchKeyword.toLowerCase());
+    
+    const outcomeMatch = !searchOutcomeType || 
+      study.outcome_type?.toLowerCase().includes(searchOutcomeType.toLowerCase());
+    
+    return keywordMatch && outcomeMatch;
+  });
+
+  // 获取所有唯一的结局指标类型
+  const uniqueOutcomeTypes = Array.from(new Set(
+    extractedStudies
+      .map(s => s.outcome_type)
+      .filter((v): v is string => !!v)
+  ));
+
+  // 对比研究切换
+  const toggleCompareStudy = (id: string) => {
+    setCompareStudies(prev =>
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  // 执行对比分析
+  const runCompareAnalysis = () => {
+    if (compareStudies.length < 2) {
+      alert('请至少选择2项研究进行对比');
+      return;
+    }
+
+    const selectedData = extractedStudies.filter(s => compareStudies.includes(s.id));
+    
+    // 检查是否为同一结局指标
+    const outcomeTypes = new Set(selectedData.map(s => s.outcome_type).filter(Boolean));
+    if (outcomeTypes.size > 1) {
+      alert('选择的研究的结局指标不一致，请选择相同结局指标的研究');
+      return;
+    }
+
+    // 计算汇总统计
+    const totalSampleTreatment = selectedData.reduce((sum, s) => sum + (s.sample_size_treatment || 0), 0);
+    const totalSampleControl = selectedData.reduce((sum, s) => sum + (s.sample_size_control || 0), 0);
+    const totalEventsTreatment = selectedData.reduce((sum, s) => sum + (s.events_treatment || 0), 0);
+    const totalEventsControl = selectedData.reduce((sum, s) => sum + (s.events_control || 0), 0);
+
+    // 计算合并率
+    const pooledRateTreatment = totalSampleTreatment > 0 ? totalEventsTreatment / totalSampleTreatment : 0;
+    const pooledRateControl = totalSampleControl > 0 ? totalEventsControl / totalSampleControl : 0;
+
+    // 计算异质性 I²
+    let heterogeneityI2 = 0;
+    if (selectedData.every(s => s.effect_size !== null && s.standard_error !== null)) {
+      const effectSizes = selectedData.map(s => s.effect_size!);
+      const weights = selectedData.map(s => 1 / Math.pow(s.standard_error!, 2));
+      const totalWeight = weights.reduce((a, b) => a + b, 0);
+      const weightedMean = effectSizes.reduce((sum, es, i) => sum + es * weights[i], 0) / totalWeight;
+      
+      const Q = effectSizes.reduce((sum, es, i) => sum + weights[i] * Math.pow(es - weightedMean, 2), 0);
+      const df = selectedData.length - 1;
+      const I2 = Math.max(0, (Q - df) / Q * 100);
+      heterogeneityI2 = I2;
+    }
+
+    setCompareResult({
+      outcomeType: selectedData[0]?.outcome_type || '未知',
+      studies: selectedData,
+      stats: {
+        totalSample: totalSampleTreatment + totalSampleControl,
+        totalEvents: totalEventsTreatment + totalEventsControl,
+        pooledRate: pooledRateTreatment,
+        heterogeneityI2,
+      },
+    });
+    setShowCompare(true);
+  };
+
+  // 快速创建Meta分析
+  const quickCreateAnalysis = () => {
+    if (compareStudies.length < 2) {
+      alert('请至少选择2项研究');
+      return;
+    }
+    
+    // 设置选中的研究并跳转到数据提取Tab
+    setSelectedStudies(compareStudies);
+    setActiveTab('data');
+  };
+
   const createAnalysis = async () => {
     if (selectedStudies.length < 2) {
       alert('请至少选择2项研究进行分析');
@@ -661,9 +770,10 @@ export default function Home() {
         )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-3 mb-6">
+          <TabsList className="grid w-full grid-cols-4 mb-6">
             <TabsTrigger value="literature" className="gap-2"><Upload className="h-4 w-4" /> 文献管理</TabsTrigger>
             <TabsTrigger value="data" className="gap-2"><Database className="h-4 w-4" /> 数据提取</TabsTrigger>
+            <TabsTrigger value="compare" className="gap-2"><Search className="h-4 w-4" /> 数据对比</TabsTrigger>
             <TabsTrigger value="analysis" className="gap-2"><BarChart3 className="h-4 w-4" /> Meta分析</TabsTrigger>
           </TabsList>
 
@@ -914,6 +1024,293 @@ export default function Home() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="compare">
+            <div className="space-y-6">
+              {/* 搜索和筛选区域 */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Search className="h-5 w-5" />
+                    数据搜索与对比
+                  </CardTitle>
+                  <CardDescription>
+                    搜索文献数据，对比不同研究的同一指标，快速发现差异
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-wrap gap-4">
+                    <div className="flex-1 min-w-[200px]">
+                      <Label className="text-sm text-slate-500 mb-1 block">关键词搜索</Label>
+                      <Input
+                        placeholder="搜索研究名称、结局指标、样本量名称..."
+                        value={searchKeyword}
+                        onChange={(e) => setSearchKeyword(e.target.value)}
+                        className="w-full"
+                      />
+                    </div>
+                    <div className="w-[200px]">
+                      <Label className="text-sm text-slate-500 mb-1 block">结局指标类型</Label>
+                      <Select value={searchOutcomeType} onValueChange={setSearchOutcomeType}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="全部类型" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">全部类型</SelectItem>
+                          {uniqueOutcomeTypes.map(type => (
+                            <SelectItem key={type} value={type}>{type}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  
+                  {/* 搜索结果统计 */}
+                  <div className="mt-4 flex items-center justify-between">
+                    <div className="text-sm text-slate-500">
+                      找到 <span className="font-medium text-slate-700">{filteredStudies.length}</span> 条数据记录
+                      {compareStudies.length > 0 && (
+                        <span className="ml-4">
+                          已选择 <span className="font-medium text-blue-600">{compareStudies.length}</span> 项进行对比
+                        </span>
+                      )}
+                    </div>
+                    {compareStudies.length >= 2 && (
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" onClick={() => setCompareStudies([])}>
+                          清除选择
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={quickCreateAnalysis}>
+                          <BarChart3 className="h-4 w-4 mr-1" />
+                          快速Meta分析
+                        </Button>
+                        <Button size="sm" onClick={runCompareAnalysis}>
+                          <GitCompare className="h-4 w-4 mr-1" />
+                          对比分析
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* 数据表格 */}
+              <Card>
+                <CardContent className="pt-6">
+                  {filteredStudies.length === 0 ? (
+                    <div className="text-center py-12">
+                      <Search className="mx-auto h-12 w-12 text-slate-300 mb-4" />
+                      <p className="text-slate-500">未找到匹配的数据</p>
+                      <p className="text-sm text-slate-400 mt-1">尝试调整搜索条件</p>
+                    </div>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-12">对比</TableHead>
+                          <TableHead>研究名称</TableHead>
+                          <TableHead>结局指标</TableHead>
+                          <TableHead>样本量 (治疗/对照)</TableHead>
+                          <TableHead>事件数 (治疗/对照)</TableHead>
+                          <TableHead>效应量</TableHead>
+                          <TableHead>95% CI</TableHead>
+                          <TableHead>置信度</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredStudies.map((study) => (
+                          <TableRow 
+                            key={study.id}
+                            className={compareStudies.includes(study.id) ? 'bg-blue-50 dark:bg-blue-900/10' : ''}
+                          >
+                            <TableCell>
+                              <Checkbox
+                                checked={compareStudies.includes(study.id)}
+                                onCheckedChange={() => toggleCompareStudy(study.id)}
+                              />
+                            </TableCell>
+                            <TableCell className="font-medium">{study.study_name || '未命名'}</TableCell>
+                            <TableCell>
+                              <Badge variant="secondary" className="text-xs">
+                                {study.outcome_type || '未分类'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              {study.sample_size_treatment && study.sample_size_control ? (
+                                <div className="text-sm">
+                                  <span className="font-medium">{study.sample_size_treatment}/{study.sample_size_control}</span>
+                                  {study.sample_size_treatment_name && (
+                                    <div className="text-xs text-slate-500">{study.sample_size_treatment_name}</div>
+                                  )}
+                                </div>
+                              ) : '-'}
+                            </TableCell>
+                            <TableCell>
+                              {study.events_treatment !== null && study.events_control !== null ? (
+                                <div className="text-sm">
+                                  <span className="font-medium">{study.events_treatment}/{study.events_control}</span>
+                                  {study.events_treatment_name && (
+                                    <div className="text-xs text-slate-500">{study.events_treatment_name}</div>
+                                  )}
+                                </div>
+                              ) : '-'}
+                            </TableCell>
+                            <TableCell>
+                              {study.effect_size !== null ? (
+                                <span className="font-mono">{study.effect_size.toFixed(3)}</span>
+                              ) : '-'}
+                            </TableCell>
+                            <TableCell>
+                              {study.ci_lower !== null && study.ci_upper !== null ? (
+                                <span className="font-mono text-xs">
+                                  [{study.ci_lower.toFixed(3)}, {study.ci_upper.toFixed(3)}]
+                                </span>
+                              ) : '-'}
+                            </TableCell>
+                            <TableCell>
+                              {study.confidence !== null ? (
+                                <Badge variant={study.confidence >= 0.8 ? 'default' : 'secondary'}>
+                                  {(study.confidence * 100).toFixed(0)}%
+                                </Badge>
+                              ) : '-'}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* 对比结果对话框 */}
+              <Dialog open={showCompare} onOpenChange={setShowCompare}>
+                <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                      <GitCompare className="h-5 w-5" />
+                      数据对比分析结果
+                    </DialogTitle>
+                    <DialogDescription>
+                      结局指标: {compareResult?.outcomeType}
+                    </DialogDescription>
+                  </DialogHeader>
+                  
+                  {compareResult && (
+                    <div className="space-y-6">
+                      {/* 汇总统计 */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <Card className="p-4">
+                          <div className="text-sm text-slate-500">总样本量</div>
+                          <div className="text-2xl font-bold">{compareResult.stats?.totalSample.toLocaleString()}</div>
+                        </Card>
+                        <Card className="p-4">
+                          <div className="text-sm text-slate-500">总事件数</div>
+                          <div className="text-2xl font-bold">{compareResult.stats?.totalEvents.toLocaleString()}</div>
+                        </Card>
+                        <Card className="p-4">
+                          <div className="text-sm text-slate-500">合并率</div>
+                          <div className="text-2xl font-bold">
+                            {compareResult.stats?.pooledRate != null 
+                              ? (compareResult.stats.pooledRate * 100).toFixed(1) + '%'
+                              : '-'}
+                          </div>
+                        </Card>
+                        <Card className="p-4">
+                          <div className="text-sm text-slate-500">异质性 I²</div>
+                          <div className={`text-2xl font-bold ${
+                            ((compareResult.stats?.heterogeneityI2 ?? 0)) > 50 ? 'text-orange-500' : 'text-green-500'
+                          }`}>
+                            {(compareResult.stats?.heterogeneityI2 ?? 0).toFixed(1)}%
+                          </div>
+                          <div className="text-xs text-slate-400">
+                            {((compareResult.stats?.heterogeneityI2 ?? 0)) > 50 ? '高异质性' : '低异质性'}
+                          </div>
+                        </Card>
+                      </div>
+
+                      {/* 研究对比详情 */}
+                      <div>
+                        <h4 className="font-semibold mb-3 flex items-center gap-2">
+                          <Info className="h-4 w-4" />
+                          各研究数据对比
+                        </h4>
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>研究</TableHead>
+                              <TableHead>样本量 (治疗/对照)</TableHead>
+                              <TableHead>事件数 (治疗/对照)</TableHead>
+                              <TableHead>效应量</TableHead>
+                              <TableHead>置信区间</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {compareResult.studies.map((study) => (
+                              <TableRow key={study.id}>
+                                <TableCell className="font-medium">{study.study_name}</TableCell>
+                                <TableCell>
+                                  {study.sample_size_treatment}/{study.sample_size_control}
+                                </TableCell>
+                                <TableCell>
+                                  {study.events_treatment ?? '-'}/{study.events_control ?? '-'}
+                                </TableCell>
+                                <TableCell>
+                                  {study.effect_size?.toFixed(3) ?? '-'}
+                                </TableCell>
+                                <TableCell>
+                                  {study.ci_lower !== null && study.ci_upper !== null
+                                    ? `[${study.ci_lower.toFixed(3)}, ${study.ci_upper.toFixed(3)}]`
+                                    : '-'}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+
+                      {/* 数据差异提示 */}
+                      <Card className="bg-slate-50 dark:bg-slate-800">
+                        <CardContent className="pt-4">
+                          <h4 className="font-semibold mb-2">数据差异分析</h4>
+                          <div className="text-sm text-slate-600 space-y-1">
+                            {compareResult.studies.length > 1 && (
+                              <>
+                                <p>• 研究数量: {compareResult.studies.length} 项</p>
+                                <p>• 效应量范围: {
+                                  Math.min(...compareResult.studies.map(s => s.effect_size ?? 0)).toFixed(3)
+                                } ~ {
+                                  Math.max(...compareResult.studies.map(s => s.effect_size ?? 0)).toFixed(3)
+                                }</p>
+                                <p>• 异质性评价: {
+                                  (compareResult.stats?.heterogeneityI2 || 0) > 75 ? '高异质性 (>75%)，建议使用随机效应模型' :
+                                  (compareResult.stats?.heterogeneityI2 || 0) > 50 ? '中等异质性 (50-75%)，可考虑亚组分析' :
+                                  '低异质性 (<50%)，研究间一致性较好'
+                                }</p>
+                              </>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      {/* 操作按钮 */}
+                      <div className="flex justify-end gap-2">
+                        <Button variant="outline" onClick={() => setShowCompare(false)}>
+                          关闭
+                        </Button>
+                        <Button onClick={() => {
+                          setShowCompare(false);
+                          quickCreateAnalysis();
+                        }}>
+                          <BarChart3 className="h-4 w-4 mr-1" />
+                          创建Meta分析
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </DialogContent>
+              </Dialog>
+            </div>
           </TabsContent>
 
           <TabsContent value="analysis">
