@@ -175,6 +175,7 @@ export default function Home() {
   const [loadingFunnelPlot, setLoadingFunnelPlot] = useState<string | null>(null);
   const [exportingExcel, setExportingExcel] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [processingCount, setProcessingCount] = useState(0);
 
   useEffect(() => {
     setMounted(true);
@@ -202,6 +203,28 @@ export default function Home() {
     }
   }, []);
 
+  // 轮询检查处理中的文献
+  useEffect(() => {
+    if (!mounted) return;
+    
+    // 检查是否有处理中的文献
+    const hasProcessing = literature.some(
+      lit => lit.status === 'parsing' || lit.status === 'extracting'
+    );
+    
+    if (hasProcessing) {
+      setProcessingCount(prev => prev + 1);
+      const timer = setTimeout(() => {
+        loadLiterature();
+        loadExtractedData();
+      }, 3000); // 每3秒刷新一次
+      
+      return () => clearTimeout(timer);
+    } else {
+      setProcessingCount(0);
+    }
+  }, [mounted, literature, loadLiterature, loadExtractedData]);
+
   const loadAnalyses = useCallback(async () => {
     try {
       const res = await fetch('/api/analysis');
@@ -225,19 +248,21 @@ export default function Home() {
     }
   };
 
-  // 上传单个PDF文献
+  // 上传单个PDF文献（异步处理）
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !apiKey) return;
 
     setUploading(true);
     try {
+      // 1. 上传文件到对象存储
       const formData = new FormData();
       formData.append('file', file);
       const uploadRes = await fetch('/api/literature/upload', { method: 'POST', body: formData });
       const uploadData = await uploadRes.json();
       if (!uploadData.success) throw new Error(uploadData.error);
 
+      // 2. 创建文献记录（状态为 pending）
       const createRes = await fetch('/api/literature', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -250,38 +275,35 @@ export default function Home() {
       const createData = await createRes.json();
       if (!createData.success) throw new Error(createData.error);
 
-      const parseRes = await fetch('/api/literature/parse', {
+      // 立即刷新文献列表，显示新文献
+      await loadLiterature();
+      
+      // 3. 异步处理（不等待完成）
+      fetch('/api/literature/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          literatureId: createData.data.id,
           fileUrl: uploadData.data.fileUrl,
-          literatureId: createData.data.id,
-        }),
-      });
-      const parseData = await parseRes.json();
-      if (!parseData.success) throw new Error(parseData.error);
-
-      const extractRes = await fetch('/api/literature/extract', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          literatureId: createData.data.id,
-          content: parseData.data.content,
           apiKey: apiKey,
         }),
+      }).then(async (res) => {
+        // 处理完成后刷新数据
+        await loadLiterature();
+        await loadExtractedData();
+      }).catch((error) => {
+        console.error('Process error:', error);
       });
-      if (!extractRes.ok) {
-        const errorData = await extractRes.json();
-        throw new Error(errorData.error);
-      }
 
-      await loadLiterature();
-      await loadExtractedData();
+      // 立即返回，不等待处理完成
+      alert('文件已上传，正在后台处理中...');
     } catch (error) {
       console.error('Upload error:', error);
       alert(error instanceof Error ? error.message : '上传失败');
     } finally {
       setUploading(false);
+      // 重置文件输入
+      e.target.value = '';
     }
   };
 
@@ -461,17 +483,45 @@ export default function Home() {
     switch (status) {
       case 'completed': return <CheckCircle className="h-4 w-4 text-green-500" />;
       case 'extracting': return <Loader2 className="h-4 w-4 text-blue-500 animate-spin" />;
-      case 'failed': return <XCircle className="h-4 w-4 text-red-500" />;
-      default: return <Clock className="h-4 w-4 text-yellow-500" />;
+      case 'parsing': return <Loader2 className="h-4 w-4 text-orange-500 animate-spin" />;
+      case 'error': return <XCircle className="h-4 w-4 text-red-500" />;
+      default: return <Clock className="h-4 w-4 text-slate-400" />;
     }
   };
 
   const getStatusText = (status: string) => {
     switch (status) {
       case 'completed': return '已完成';
-      case 'extracting': return '提取中';
-      case 'failed': return '失败';
+      case 'extracting': return 'AI提取中...';
+      case 'parsing': return '解析文档中...';
+      case 'error': return '处理失败';
       default: return '待处理';
+    }
+  };
+
+  const getStatusBadge = (status: string) => {
+    const baseClasses = "inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium";
+    switch (status) {
+      case 'completed': 
+        return <span className={`${baseClasses} bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400`}>
+          <CheckCircle className="h-3 w-3" /> 已完成
+        </span>;
+      case 'extracting': 
+        return <span className={`${baseClasses} bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400`}>
+          <Loader2 className="h-3 w-3 animate-spin" /> AI提取中
+        </span>;
+      case 'parsing': 
+        return <span className={`${baseClasses} bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400`}>
+          <Loader2 className="h-3 w-3 animate-spin" /> 解析中
+        </span>;
+      case 'error': 
+        return <span className={`${baseClasses} bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400`}>
+          <XCircle className="h-3 w-3" /> 失败
+        </span>;
+      default: 
+        return <span className={`${baseClasses} bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400`}>
+          <Clock className="h-3 w-3" /> 待处理
+        </span>;
     }
   };
 
@@ -658,6 +708,15 @@ export default function Home() {
                   </div>
                 ) : (
                   <>
+                    {/* 处理进度提示 */}
+                    {literature.some(lit => lit.status === 'parsing' || lit.status === 'extracting') && (
+                      <div className="flex items-center gap-2 mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                        <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                        <span className="text-sm text-blue-700 dark:text-blue-300">
+                          有 {literature.filter(lit => lit.status === 'parsing' || lit.status === 'extracting').length} 篇文献正在后台处理中，页面将自动刷新...
+                        </span>
+                      </div>
+                    )}
                     {/* 批量操作栏 */}
                     {selectedLiteratureIds.length > 0 && (
                       <div className="flex items-center justify-between mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
@@ -705,10 +764,7 @@ export default function Home() {
                               />
                             </TableCell>
                             <TableCell>
-                              <div className="flex items-center gap-2">
-                                {getStatusIcon(lit.status)}
-                                <span className="text-sm">{getStatusText(lit.status)}</span>
-                              </div>
+                              {getStatusBadge(lit.status)}
                             </TableCell>
                             <TableCell className="font-medium max-w-xs truncate" title={lit.title || ''}>
                               {lit.title || '未命名'}
