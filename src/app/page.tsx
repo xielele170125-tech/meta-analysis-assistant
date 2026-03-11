@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -21,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Table,
   TableBody,
@@ -29,7 +31,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp } from 'lucide-react';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet } from 'lucide-react';
 
 // 类型定义
 interface Literature {
@@ -38,6 +41,7 @@ interface Literature {
   authors: string | null;
   year: number | null;
   journal: string | null;
+  doi: string | null;
   file_name: string | null;
   status: string;
   error_message: string | null;
@@ -85,12 +89,33 @@ interface MetaAnalysisResult {
   };
 }
 
+interface ImportResultRecord {
+  title: string;
+  doi: string | null;
+  status: 'imported' | 'no_pdf' | 'failed';
+  message: string;
+  literatureId?: string;
+}
+
+interface ImportResult {
+  total: number;
+  imported: number;
+  withPdf: number;
+  withoutPdf: number;
+  failed: number;
+  records: ImportResultRecord[];
+}
+
 export default function Home() {
   const [apiKey, setApiKey] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [activeTab, setActiveTab] = useState('literature');
   const [literature, setLiterature] = useState<Literature[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [showImportResult, setShowImportResult] = useState(false);
+  const [autoDownloadPdf, setAutoDownloadPdf] = useState(true);
   const [extractedStudies, setExtractedStudies] = useState<ExtractedStudy[]>([]);
   const [selectedStudies, setSelectedStudies] = useState<Set<string>>(new Set());
   const [analyses, setAnalyses] = useState<MetaAnalysisResult[]>([]);
@@ -148,6 +173,7 @@ export default function Home() {
     }
   };
 
+  // 上传单个PDF文献
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !apiKey) return;
@@ -204,6 +230,84 @@ export default function Home() {
       alert(error instanceof Error ? error.message : '上传失败');
     } finally {
       setUploading(false);
+    }
+  };
+
+  // 导入EndNote文件
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImporting(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('autoDownloadPdf', autoDownloadPdf.toString());
+
+      const res = await fetch('/api/literature/import', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+
+      if (!data.success) {
+        throw new Error(data.error);
+      }
+
+      setImportResult(data.data);
+      setShowImportResult(true);
+      await loadLiterature();
+
+      // 如果有带PDF的文献，自动提取数据
+      if (apiKey && data.data.withPdf > 0) {
+        const importedWithPdf = data.data.records.filter(
+          (r: ImportResultRecord) => r.status === 'imported' && r.literatureId
+        );
+        
+        for (const record of importedWithPdf) {
+          try {
+            // 获取文献详情
+            const litRes = await fetch(`/api/literature?id=${record.literatureId}`);
+            const litData = await litRes.json();
+            
+            if (litData.success && litData.data.file_key) {
+              // 解析PDF
+              const parseRes = await fetch('/api/literature/parse', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  fileKey: litData.data.file_key,
+                  literatureId: record.literatureId,
+                }),
+              });
+              const parseData = await parseRes.json();
+              
+              if (parseData.success) {
+                // 提取数据
+                await fetch('/api/literature/extract', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    literatureId: record.literatureId,
+                    content: parseData.data.content,
+                    apiKey: apiKey,
+                  }),
+                });
+              }
+            }
+          } catch {
+            // 忽略单个文献的错误
+          }
+        }
+        await loadExtractedData();
+      }
+    } catch (error) {
+      console.error('Import error:', error);
+      alert(error instanceof Error ? error.message : '导入失败');
+    } finally {
+      setImporting(false);
+      // 重置文件输入
+      e.target.value = '';
     }
   };
 
@@ -335,13 +439,26 @@ export default function Home() {
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
-                  <div><CardTitle>文献列表</CardTitle><CardDescription>上传文献并自动提取数据</CardDescription></div>
-                  <div>
+                  <div><CardTitle>文献列表</CardTitle><CardDescription>上传文献或导入EndNote文件</CardDescription></div>
+                  <div className="flex items-center gap-2">
+                    {/* 导入EndNote按钮 */}
+                    <div className="flex items-center gap-2 mr-2">
+                      <Checkbox id="auto-pdf" checked={autoDownloadPdf} onCheckedChange={(checked) => setAutoDownloadPdf(checked as boolean)} />
+                      <label htmlFor="auto-pdf" className="text-sm text-slate-600 cursor-pointer">自动下载PDF</label>
+                    </div>
+                    <input type="file" id="import-file" className="hidden" accept=".ris,.txt,.xml" onChange={handleImport} disabled={importing} />
+                    <Button variant="outline" asChild disabled={importing}>
+                      <label htmlFor="import-file" className="cursor-pointer">
+                        {importing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
+                        {importing ? '导入中...' : '导入EndNote'}
+                      </label>
+                    </Button>
+                    {/* 上传PDF按钮 */}
                     <input type="file" id="file-upload" className="hidden" accept=".pdf,.doc,.docx" onChange={handleUpload} disabled={uploading || !apiKey} />
                     <Button asChild disabled={uploading || !apiKey}>
                       <label htmlFor="file-upload" className="cursor-pointer">
                         {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileUp className="mr-2 h-4 w-4" />}
-                        {uploading ? '上传中...' : '上传文献'}
+                        {uploading ? '上传中...' : '上传PDF'}
                       </label>
                     </Button>
                   </div>
@@ -349,21 +466,60 @@ export default function Home() {
               </CardHeader>
               <CardContent>
                 {literature.length === 0 ? (
-                  <div className="text-center py-12"><FileText className="mx-auto h-12 w-12 text-slate-300 mb-4" /><p className="text-slate-500">暂无文献，请上传PDF或Word文档</p></div>
+                  <div className="text-center py-12">
+                    <FileText className="mx-auto h-12 w-12 text-slate-300 mb-4" />
+                    <p className="text-slate-500 mb-2">暂无文献</p>
+                    <p className="text-sm text-slate-400">上传PDF或导入EndNote文件（RIS/XML格式）</p>
+                  </div>
                 ) : (
                   <Table>
-                    <TableHeader><TableRow><TableHead>状态</TableHead><TableHead>文献名称</TableHead><TableHead>年份</TableHead><TableHead>上传时间</TableHead><TableHead>操作</TableHead></TableRow></TableHeader>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>状态</TableHead>
+                        <TableHead>文献名称</TableHead>
+                        <TableHead>作者</TableHead>
+                        <TableHead>年份</TableHead>
+                        <TableHead>期刊</TableHead>
+                        <TableHead>PDF</TableHead>
+                        <TableHead>操作</TableHead>
+                      </TableRow>
+                    </TableHeader>
                     <TableBody>
                       {literature.map((lit) => (
                         <TableRow key={lit.id}>
-                          <TableCell><div className="flex items-center gap-2">{getStatusIcon(lit.status)}<span className="text-sm">{getStatusText(lit.status)}</span></div></TableCell>
-                          <TableCell className="font-medium">{lit.title || lit.file_name}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              {getStatusIcon(lit.status)}
+                              <span className="text-sm">{getStatusText(lit.status)}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-medium max-w-xs truncate" title={lit.title || ''}>
+                            {lit.title || '未命名'}
+                          </TableCell>
+                          <TableCell className="max-w-xs truncate" title={lit.authors || ''}>
+                            {lit.authors || '-'}
+                          </TableCell>
                           <TableCell>{lit.year || '-'}</TableCell>
-                          <TableCell>{new Date(lit.created_at).toLocaleDateString()}</TableCell>
+                          <TableCell className="max-w-xs truncate" title={lit.journal || ''}>
+                            {lit.journal || '-'}
+                          </TableCell>
+                          <TableCell>
+                            {lit.file_name ? (
+                              <Badge variant="secondary" className="gap-1">
+                                <FileText className="h-3 w-3" /> 已上传
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-slate-400">无PDF</Badge>
+                            )}
+                          </TableCell>
                           <TableCell>
                             <div className="flex gap-2">
-                              <Button variant="ghost" size="sm" onClick={() => setSelectedLiterature(lit)}><Eye className="h-4 w-4" /></Button>
-                              <Button variant="ghost" size="sm" onClick={() => deleteLiterature(lit.id)}><Trash2 className="h-4 w-4 text-red-500" /></Button>
+                              <Button variant="ghost" size="sm" onClick={() => setSelectedLiterature(lit)}>
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => deleteLiterature(lit.id)}>
+                                <Trash2 className="h-4 w-4 text-red-500" />
+                              </Button>
                             </div>
                           </TableCell>
                         </TableRow>
@@ -380,15 +536,29 @@ export default function Home() {
               <CardHeader><CardTitle>提取的数据</CardTitle><CardDescription>选择研究进行Meta分析</CardDescription></CardHeader>
               <CardContent>
                 {extractedStudies.length === 0 ? (
-                  <div className="text-center py-12"><Database className="mx-auto h-12 w-12 text-slate-300 mb-4" /><p className="text-slate-500">暂无数据，请先上传文献</p></div>
+                  <div className="text-center py-12">
+                    <Database className="mx-auto h-12 w-12 text-slate-300 mb-4" />
+                    <p className="text-slate-500">暂无数据，请先上传文献</p>
+                  </div>
                 ) : (
                   <div className="space-y-4">
                     <Table>
-                      <TableHeader><TableRow><TableHead className="w-12">选择</TableHead><TableHead>研究名称</TableHead><TableHead>样本量(T/C)</TableHead><TableHead>效应量(SMD)</TableHead><TableHead>95% CI</TableHead><TableHead>置信度</TableHead></TableRow></TableHeader>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-12">选择</TableHead>
+                          <TableHead>研究名称</TableHead>
+                          <TableHead>样本量(T/C)</TableHead>
+                          <TableHead>效应量(SMD)</TableHead>
+                          <TableHead>95% CI</TableHead>
+                          <TableHead>置信度</TableHead>
+                        </TableRow>
+                      </TableHeader>
                       <TableBody>
                         {extractedStudies.map((study) => (
                           <TableRow key={study.id}>
-                            <TableCell><input type="checkbox" checked={selectedStudies.has(study.id)} onChange={() => toggleStudySelection(study.id)} className="h-4 w-4" /></TableCell>
+                            <TableCell>
+                              <input type="checkbox" checked={selectedStudies.has(study.id)} onChange={() => toggleStudySelection(study.id)} className="h-4 w-4" />
+                            </TableCell>
                             <TableCell className="font-medium">{study.study_name || '未命名'}</TableCell>
                             <TableCell>{study.sample_size_treatment && study.sample_size_control ? `${study.sample_size_treatment}/${study.sample_size_control}` : '-'}</TableCell>
                             <TableCell>{study.effect_size !== null ? study.effect_size.toFixed(3) : '-'}</TableCell>
@@ -467,17 +637,82 @@ export default function Home() {
         </Tabs>
       </main>
 
+      {/* 文献详情弹窗 */}
       <Dialog open={!!selectedLiterature} onOpenChange={() => setSelectedLiterature(null)}>
         <DialogContent className="max-w-2xl">
           <DialogHeader><DialogTitle>文献详情</DialogTitle></DialogHeader>
           {selectedLiterature && (
             <div className="space-y-4">
-              <div><Label className="text-slate-500">标题</Label><p className="font-medium">{selectedLiterature.title || selectedLiterature.file_name}</p></div>
+              <div><Label className="text-slate-500">标题</Label><p className="font-medium">{selectedLiterature.title || '未命名'}</p></div>
               <div className="grid grid-cols-2 gap-4">
                 <div><Label className="text-slate-500">作者</Label><p>{selectedLiterature.authors || '-'}</p></div>
                 <div><Label className="text-slate-500">年份</Label><p>{selectedLiterature.year || '-'}</p></div>
               </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><Label className="text-slate-500">期刊</Label><p>{selectedLiterature.journal || '-'}</p></div>
+                <div><Label className="text-slate-500">DOI</Label><p className="truncate">{selectedLiterature.doi || '-'}</p></div>
+              </div>
               {selectedLiterature.error_message && <div className="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg"><Label className="text-red-600">错误信息</Label><p className="text-red-600">{selectedLiterature.error_message}</p></div>}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* 导入结果弹窗 */}
+      <Dialog open={showImportResult} onOpenChange={setShowImportResult}>
+        <DialogContent className="max-w-3xl max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle>导入结果</DialogTitle>
+            <DialogDescription>
+              共导入 {importResult?.imported} / {importResult?.total} 篇文献
+            </DialogDescription>
+          </DialogHeader>
+          {importResult && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-4 gap-4">
+                <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg text-center">
+                  <p className="text-2xl font-bold text-green-600">{importResult.imported}</p>
+                  <p className="text-sm text-slate-500">成功导入</p>
+                </div>
+                <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-center">
+                  <p className="text-2xl font-bold text-blue-600">{importResult.withPdf}</p>
+                  <p className="text-sm text-slate-500">已下载PDF</p>
+                </div>
+                <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg text-center">
+                  <p className="text-2xl font-bold text-yellow-600">{importResult.withoutPdf}</p>
+                  <p className="text-sm text-slate-500">无PDF</p>
+                </div>
+                <div className="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg text-center">
+                  <p className="text-2xl font-bold text-red-600">{importResult.failed}</p>
+                  <p className="text-sm text-slate-500">导入失败</p>
+                </div>
+              </div>
+              <ScrollArea className="h-[300px]">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>状态</TableHead>
+                      <TableHead>文献</TableHead>
+                      <TableHead>DOI</TableHead>
+                      <TableHead>说明</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {importResult.records.map((record, i) => (
+                      <TableRow key={i}>
+                        <TableCell>
+                          {record.status === 'imported' && <Badge className="bg-green-500">已导入</Badge>}
+                          {record.status === 'no_pdf' && <Badge variant="secondary">无PDF</Badge>}
+                          {record.status === 'failed' && <Badge variant="destructive">失败</Badge>}
+                        </TableCell>
+                        <TableCell className="max-w-xs truncate">{record.title}</TableCell>
+                        <TableCell className="max-w-xs truncate">{record.doi || '-'}</TableCell>
+                        <TableCell className="text-sm text-slate-500">{record.message}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </ScrollArea>
             </div>
           )}
         </DialogContent>
