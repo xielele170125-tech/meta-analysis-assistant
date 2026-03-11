@@ -29,21 +29,66 @@ interface ImportResult {
 
 /**
  * 通过 DOI 获取开放获取 PDF 链接
+ * 使用 Unpaywall API: https://unpaywall.org/products/api
  */
-async function getPDFByDOI(doi: string): Promise<string | null> {
+async function getPDFByDOI(doi: string): Promise<{ url: string; source: string } | null> {
   try {
-    const email = 'meta-analysis-tool@example.com';
-    const url = `https://api.unpaywall.org/v2/${encodeURIComponent(doi)}?email=${email}`;
+    // Unpaywall 要求使用真实的邮箱地址
+    const email = 'meta-analysis-research@academic-tool.org';
+    const apiUrl = `https://api.unpaywall.org/v2/${encodeURIComponent(doi)}?email=${email}`;
 
-    const response = await fetch(url, {
-      headers: { 'Accept': 'application/json' },
+    console.log(`[PDF Download] Checking Unpaywall for DOI: ${doi}`);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 增加到 30 秒超时
+
+    const response = await fetch(apiUrl, {
+      headers: { 
+        'Accept': 'application/json',
+        'User-Agent': 'Meta-Analysis-Tool/1.0',
+      },
+      signal: controller.signal,
     });
 
-    if (!response.ok) return null;
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        console.log(`[PDF Download] DOI ${doi} not found in Unpaywall database (404)`);
+      } else {
+        console.log(`[PDF Download] Unpaywall API error: ${response.status}`);
+      }
+      return null;
+    }
 
     const data = await response.json();
-    return data.best_oa_location?.url_for_pdf || data.best_oa_location?.url || null;
-  } catch {
+    console.log(`[PDF Download] Unpaywall response: is_oa=${data.is_oa}, title="${data.title?.substring(0, 50)}..."`);
+    
+    // 检查是否有开放获取版本
+    if (data.is_oa) {
+      // 只使用直接 PDF 链接（不使用落地页 URL，因为那不是 PDF）
+      const pdfUrl = data.best_oa_location?.url_for_pdf;
+      
+      if (pdfUrl) {
+        console.log(`[PDF Download] Found PDF URL: ${pdfUrl}`);
+        return { 
+          url: pdfUrl, 
+          source: data.best_oa_location?.host_type || 'repository' 
+        };
+      }
+      
+      // 有 OA 但没有直接 PDF 链接
+      console.log(`[PDF Download] Article is OA but no direct PDF link available`);
+    }
+    
+    console.log(`[PDF Download] No open access PDF found for DOI: ${doi}`);
+    return null;
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.error(`[PDF Download] Timeout checking DOI ${doi}`);
+    } else {
+      console.error(`[PDF Download] Error checking DOI ${doi}:`, error);
+    }
     return null;
   }
 }
@@ -53,22 +98,37 @@ async function getPDFByDOI(doi: string): Promise<string | null> {
  */
 async function downloadAndUploadPDF(pdfUrl: string, doi: string): Promise<{ key: string; url: string } | null> {
   try {
+    console.log(`[PDF Download] Downloading from: ${pdfUrl}`);
+    
     const response = await fetch(pdfUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; Meta-Analysis-Tool/1.0)',
       },
+      redirect: 'follow',
     });
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      console.log(`[PDF Download] Download failed: ${response.status}`);
+      return null;
+    }
 
-    const contentType = response.headers.get('content-type') || 'application/pdf';
+    const contentType = response.headers.get('content-type') || '';
+    console.log(`[PDF Download] Content-Type: ${contentType}`);
     
     // 检查是否为 PDF
-    if (!contentType.includes('pdf') && !pdfUrl.toLowerCase().endsWith('.pdf')) {
+    if (!contentType.includes('pdf') && !contentType.includes('octet-stream') && !pdfUrl.toLowerCase().endsWith('.pdf')) {
+      console.log(`[PDF Download] Not a PDF file, skipping`);
       return null;
     }
 
     const arrayBuffer = await response.arrayBuffer();
+    console.log(`[PDF Download] Downloaded ${arrayBuffer.byteLength} bytes`);
+    
+    if (arrayBuffer.byteLength < 1000) {
+      console.log(`[PDF Download] File too small, likely not a valid PDF`);
+      return null;
+    }
+    
     const buffer = Buffer.from(arrayBuffer);
 
     // 生成文件名
@@ -76,11 +136,14 @@ async function downloadAndUploadPDF(pdfUrl: string, doi: string): Promise<{ key:
     const fileName = `literature/${safeDoi}.pdf`;
 
     // 上传到对象存储
+    console.log(`[PDF Download] Uploading to storage: ${fileName}`);
     const key = await storage.uploadFile({
       fileContent: buffer,
       fileName,
       contentType: 'application/pdf',
     });
+    
+    console.log(`[PDF Download] Upload successful, key: ${key}`);
 
     // 生成访问 URL
     const url = await storage.generatePresignedUrl({
@@ -90,7 +153,7 @@ async function downloadAndUploadPDF(pdfUrl: string, doi: string): Promise<{ key:
 
     return { key, url };
   } catch (error) {
-    console.error('Download PDF error:', error);
+    console.error(`[PDF Download] Error downloading/uploading:`, error);
     return null;
   }
 }
@@ -150,19 +213,31 @@ export async function POST(request: NextRequest) {
         let fileKey: string | null = null;
         let fileUrl: string | null = null;
         let pdfDownloaded = false;
+        let pdfMessage = '';
 
         // 尝试通过 DOI 获取 PDF
         if (autoDownloadPdf && record.doi) {
-          const pdfUrl = await getPDFByDOI(record.doi);
-          if (pdfUrl) {
-            const uploadResult = await downloadAndUploadPDF(pdfUrl, record.doi);
+          const pdfResult = await getPDFByDOI(record.doi);
+          if (pdfResult) {
+            console.log(`[Import] Found PDF for "${record.title}" via ${pdfResult.source}`);
+            const uploadResult = await downloadAndUploadPDF(pdfResult.url, record.doi);
             if (uploadResult) {
               fileKey = uploadResult.key;
               fileUrl = uploadResult.url;
               pdfDownloaded = true;
               result.withPdf++;
+              pdfMessage = `已自动下载 PDF`;
+            } else {
+              pdfMessage = '找到 PDF 链接但下载失败，请手动上传';
+              console.log(`[Import] PDF download failed for ${record.doi}`);
             }
+          } else {
+            pdfMessage = '该文献无开放获取 PDF，需手动上传';
           }
+        } else if (!record.doi) {
+          pdfMessage = '无 DOI 信息，无法自动下载';
+        } else if (!autoDownloadPdf) {
+          pdfMessage = '已导入，可手动上传 PDF';
         }
 
         // 创建文献记录
@@ -201,11 +276,9 @@ export async function POST(request: NextRequest) {
           title: record.title || '未命名文献',
           doi: record.doi || null,
           status: pdfDownloaded ? 'imported' : 'no_pdf',
-          message: pdfDownloaded
-            ? '已导入并下载 PDF'
-            : record.doi
-            ? '已导入，但未找到开放获取 PDF'
-            : '已导入，需要手动上传 PDF',
+          message: pdfDownloaded 
+            ? pdfMessage || '已导入并下载 PDF'
+            : pdfMessage || '已导入，需要手动上传 PDF',
           literatureId: literature.id,
         });
       } catch (recordError) {
