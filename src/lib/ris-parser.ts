@@ -72,11 +72,17 @@ function parseSingleRecord(lines: string[]): RISRecord {
     // 跳过空行
     if (!line.trim()) continue;
 
-    // 解析字段: "XX  - value" 或 "XX - value"
+    // 解析字段: 支持多种格式
+    // "XX  - value" (两个空格)
+    // "XX - value" (一个空格)
+    // "XX- value" (无空格)
+    // "XX -value" (空格后无空格)
+    // 注意: 正则中 (.*) 后面的空格需要在后面 trim
     const match = line.match(/^([A-Z0-9]{2})\s*-\s*(.*)$/i);
     if (!match) continue;
 
     const [, fieldCode, value] = match;
+    const trimmedValue = value.trim();
     const field = RIS_FIELD_MAP[fieldCode.toUpperCase()];
 
     if (!field) continue;
@@ -84,11 +90,11 @@ function parseSingleRecord(lines: string[]): RISRecord {
     switch (field) {
       case 'authors':
       case 'keywords':
-        (record[field] as string[]).push(value.trim());
+        (record[field] as string[]).push(trimmedValue);
         break;
       case 'year':
         // 提取年份（可能是 "2023" 或 "2023/12/31" 格式）
-        const yearMatch = value.match(/(\d{4})/);
+        const yearMatch = trimmedValue.match(/(\d{4})/);
         if (yearMatch) {
           record.year = parseInt(yearMatch[1], 10);
         }
@@ -96,19 +102,20 @@ function parseSingleRecord(lines: string[]): RISRecord {
       case 'pages':
         // SP 是起始页，EP 是结束页
         if (fieldCode.toUpperCase() === 'SP') {
-          currentPage = value.trim();
+          currentPage = trimmedValue;
         } else if (fieldCode.toUpperCase() === 'EP') {
-          record.pages = currentPage ? `${currentPage}-${value.trim()}` : value.trim();
+          record.pages = currentPage ? `${currentPage}-${trimmedValue}` : trimmedValue;
         } else {
-          record.pages = value.trim();
+          record.pages = trimmedValue;
         }
         break;
       default:
-        // 如果字段已有值，追加（处理多行字段如摘要）
-        if (field in record && typeof record[field] === 'string') {
-          (record as unknown as Record<string, unknown>)[field] = (record[field] as string) + ' ' + value.trim();
+        // 如果字段已有值且非空，追加（处理多行字段如摘要）
+        const existingValue = record[field] as string;
+        if (existingValue && existingValue.trim()) {
+          (record as unknown as Record<string, unknown>)[field] = existingValue + ' ' + trimmedValue;
         } else {
-          (record as unknown as Record<string, unknown>)[field] = value.trim();
+          (record as unknown as Record<string, unknown>)[field] = trimmedValue;
         }
     }
   }
@@ -121,29 +128,53 @@ function parseSingleRecord(lines: string[]): RISRecord {
  */
 export function parseRIS(content: string): RISRecord[] {
   const records: RISRecord[] = [];
-  const lines = content.split(/\r?\n/);
+  
+  // 统一换行符
+  const normalizedContent = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = normalizedContent.split('\n');
   let currentRecord: string[] = [];
+  let hasTy = false; // 是否遇到了 TY 字段
 
   for (const line of lines) {
+    const trimmedLine = line.trim();
+    
+    // 检测 TY 字段（记录开始）
+    if (/^TY\s*-?\s*/i.test(trimmedLine)) {
+      // 如果当前有记录，先保存
+      if (currentRecord.length > 0 && hasTy) {
+        records.push(parseSingleRecord(currentRecord));
+      }
+      currentRecord = [line];
+      hasTy = true;
+      continue;
+    }
+    
     // ER 标记记录结束
-    if (line.trim().toUpperCase() === 'ER  -' || line.trim().toUpperCase() === 'ER -') {
-      if (currentRecord.length > 0) {
+    if (/^ER\s*-?\s*$/i.test(trimmedLine)) {
+      if (currentRecord.length > 0 && hasTy) {
         records.push(parseSingleRecord(currentRecord));
         currentRecord = [];
+        hasTy = false;
       }
-    } else {
+      continue;
+    }
+
+    // 添加到当前记录
+    if (hasTy) {
       currentRecord.push(line);
     }
   }
 
   // 处理最后一条记录（如果没有 ER 结束标记）
-  if (currentRecord.length > 0) {
+  if (currentRecord.length > 0 && hasTy) {
     const record = parseSingleRecord(currentRecord);
     if (record.title || record.doi) {
       records.push(record);
     }
   }
 
+  console.log(`[RIS Parser] Parsed ${records.length} records from ${lines.length} lines`);
+  
   return records;
 }
 
@@ -205,6 +236,8 @@ export function parseEndNoteXML(content: string): RISRecord[] {
     }
   }
 
+  console.log(`[XML Parser] Parsed ${records.length} records`);
+  
   return records;
 }
 

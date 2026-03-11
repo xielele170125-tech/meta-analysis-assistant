@@ -126,8 +126,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    console.log(`[Import] Parsed ${records.length} records`);
+
     if (records.length === 0) {
-      return NextResponse.json({ error: '未能从文件中解析出文献记录' }, { status: 400 });
+      return NextResponse.json({ 
+        error: '未能从文件中解析出文献记录。请确保文件格式正确：RIS文件应以"TY -"开头，XML文件应包含<record>标签。' 
+      }, { status: 400 });
     }
 
     const client = getSupabaseClient();
