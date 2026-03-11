@@ -168,6 +168,7 @@ export default function Home() {
   const [analysisDescription, setAnalysisDescription] = useState('');
   const [modelType, setModelType] = useState('random');
   const [selectedLiterature, setSelectedLiterature] = useState<Literature | null>(null);
+  const [selectedLiteratureIds, setSelectedLiteratureIds] = useState<string[]>([]);
   const [funnelPlotData, setFunnelPlotData] = useState<Record<string, FunnelPlotResult>>({});
   const [showRCode, setShowRCode] = useState(false);
   const [rCodeData, setRCodeData] = useState<RCodeResult | null>(null);
@@ -370,6 +371,45 @@ export default function Home() {
       await loadExtractedData();
     } catch (error) {
       console.error('Delete error:', error);
+    }
+  };
+
+  // 文献多选功能
+  const toggleLiteratureSelection = (id: string) => {
+    setSelectedLiteratureIds(prev =>
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  const toggleAllLiterature = () => {
+    if (selectedLiteratureIds.length === literature.length) {
+      setSelectedLiteratureIds([]);
+    } else {
+      setSelectedLiteratureIds(literature.map(lit => lit.id));
+    }
+  };
+
+  const deleteSelectedLiterature = async () => {
+    if (selectedLiteratureIds.length === 0) return;
+    if (!confirm(`确定要删除选中的 ${selectedLiteratureIds.length} 篇文献吗？此操作不可恢复。`)) return;
+
+    try {
+      const res = await fetch('/api/literature/batch-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedLiteratureIds }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setSelectedLiteratureIds([]);
+        await loadLiterature();
+        await loadExtractedData();
+      } else {
+        alert('删除失败: ' + data.error);
+      }
+    } catch (error) {
+      console.error('Batch delete error:', error);
+      alert('删除失败');
     }
   };
 
@@ -607,37 +647,69 @@ export default function Home() {
                     <p className="text-sm text-slate-400">上传PDF或导入EndNote文件（RIS/XML格式）</p>
                   </div>
                 ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>状态</TableHead>
-                        <TableHead>文献名称</TableHead>
-                        <TableHead>作者</TableHead>
-                        <TableHead>年份</TableHead>
-                        <TableHead>期刊</TableHead>
-                        <TableHead>PDF</TableHead>
-                        <TableHead>操作</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {literature.map((lit) => (
-                        <TableRow key={lit.id}>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              {getStatusIcon(lit.status)}
-                              <span className="text-sm">{getStatusText(lit.status)}</span>
-                            </div>
-                          </TableCell>
-                          <TableCell className="font-medium max-w-xs truncate" title={lit.title || ''}>
-                            {lit.title || '未命名'}
-                          </TableCell>
-                          <TableCell className="max-w-xs truncate" title={lit.authors || ''}>
-                            {lit.authors || '-'}
-                          </TableCell>
-                          <TableCell>{lit.year || '-'}</TableCell>
-                          <TableCell className="max-w-xs truncate" title={lit.journal || ''}>
-                            {lit.journal || '-'}
-                          </TableCell>
+                  <>
+                    {/* 批量操作栏 */}
+                    {selectedLiteratureIds.length > 0 && (
+                      <div className="flex items-center justify-between mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                        <span className="text-sm text-blue-700 dark:text-blue-300">
+                          已选择 {selectedLiteratureIds.length} 篇文献
+                        </span>
+                        <div className="flex gap-2">
+                          <Button variant="outline" size="sm" onClick={() => setSelectedLiteratureIds([])}>
+                            取消选择
+                          </Button>
+                          <Button variant="destructive" size="sm" onClick={deleteSelectedLiterature}>
+                            <Trash2 className="h-4 w-4 mr-1" />
+                            删除选中
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-12">
+                            <Checkbox
+                              checked={literature.length > 0 && selectedLiteratureIds.length === literature.length}
+                              onCheckedChange={toggleAllLiterature}
+                              aria-label="全选"
+                            />
+                          </TableHead>
+                          <TableHead>状态</TableHead>
+                          <TableHead>文献名称</TableHead>
+                          <TableHead>作者</TableHead>
+                          <TableHead>年份</TableHead>
+                          <TableHead>期刊</TableHead>
+                          <TableHead>PDF</TableHead>
+                          <TableHead>操作</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {literature.map((lit) => (
+                          <TableRow key={lit.id} className={selectedLiteratureIds.includes(lit.id) ? 'bg-blue-50 dark:bg-blue-900/10' : ''}>
+                            <TableCell>
+                              <Checkbox
+                                checked={selectedLiteratureIds.includes(lit.id)}
+                                onCheckedChange={() => toggleLiteratureSelection(lit.id)}
+                                aria-label="选择此文献"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                {getStatusIcon(lit.status)}
+                                <span className="text-sm">{getStatusText(lit.status)}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="font-medium max-w-xs truncate" title={lit.title || ''}>
+                              {lit.title || '未命名'}
+                            </TableCell>
+                            <TableCell className="max-w-xs truncate" title={lit.authors || ''}>
+                              {lit.authors || '-'}
+                            </TableCell>
+                            <TableCell>{lit.year || '-'}</TableCell>
+                            <TableCell className="max-w-xs truncate" title={lit.journal || ''}>
+                              {lit.journal || '-'}
+                            </TableCell>
                           <TableCell>
                             {lit.file_name ? (
                               <Badge variant="secondary" className="gap-1">
@@ -661,6 +733,7 @@ export default function Home() {
                       ))}
                     </TableBody>
                   </Table>
+                  </>
                 )}
               </CardContent>
             </Card>
