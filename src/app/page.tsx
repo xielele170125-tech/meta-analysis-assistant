@@ -161,20 +161,22 @@ export default function Home() {
   const [showImportResult, setShowImportResult] = useState(false);
   const [autoDownloadPdf, setAutoDownloadPdf] = useState(true);
   const [extractedStudies, setExtractedStudies] = useState<ExtractedStudy[]>([]);
-  const [selectedStudies, setSelectedStudies] = useState<Set<string>>(new Set());
+  const [selectedStudies, setSelectedStudies] = useState<string[]>([]);
   const [analyses, setAnalyses] = useState<MetaAnalysisResult[]>([]);
   const [creatingAnalysis, setCreatingAnalysis] = useState(false);
   const [analysisName, setAnalysisName] = useState('');
   const [analysisDescription, setAnalysisDescription] = useState('');
   const [modelType, setModelType] = useState('random');
   const [selectedLiterature, setSelectedLiterature] = useState<Literature | null>(null);
-  const [funnelPlotData, setFunnelPlotData] = useState<Map<string, FunnelPlotResult>>(new Map());
+  const [funnelPlotData, setFunnelPlotData] = useState<Record<string, FunnelPlotResult>>({});
   const [showRCode, setShowRCode] = useState(false);
   const [rCodeData, setRCodeData] = useState<RCodeResult | null>(null);
   const [loadingFunnelPlot, setLoadingFunnelPlot] = useState<string | null>(null);
   const [exportingExcel, setExportingExcel] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     const savedKey = localStorage.getItem('deepseek_api_key');
     if (savedKey) setApiKey(savedKey);
   }, []);
@@ -372,14 +374,13 @@ export default function Home() {
   };
 
   const toggleStudySelection = (id: string) => {
-    const newSelected = new Set(selectedStudies);
-    if (newSelected.has(id)) newSelected.delete(id);
-    else newSelected.add(id);
-    setSelectedStudies(newSelected);
+    setSelectedStudies(prev => 
+      prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]
+    );
   };
 
   const createAnalysis = async () => {
-    if (selectedStudies.size < 2) {
+    if (selectedStudies.length < 2) {
       alert('请至少选择2项研究进行分析');
       return;
     }
@@ -396,7 +397,7 @@ export default function Home() {
         body: JSON.stringify({
           name: analysisName,
           description: analysisDescription,
-          studyIds: Array.from(selectedStudies),
+          studyIds: selectedStudies,
           modelType: modelType,
         }),
       });
@@ -405,7 +406,7 @@ export default function Home() {
 
       setAnalysisName('');
       setAnalysisDescription('');
-      setSelectedStudies(new Set());
+      setSelectedStudies([]);
       await loadAnalyses();
       setActiveTab('analysis');
     } catch (error) {
@@ -490,7 +491,7 @@ export default function Home() {
         throw new Error(data.error || '获取漏斗图数据失败');
       }
       
-      setFunnelPlotData(prev => new Map(prev).set(analysisId, data.data));
+      setFunnelPlotData(prev => ({ ...prev, [analysisId]: data.data }));
     } catch (error) {
       console.error('Load funnel plot error:', error);
       alert(error instanceof Error ? error.message : '获取漏斗图数据失败');
@@ -506,6 +507,18 @@ export default function Home() {
       alert('R代码已复制到剪贴板');
     }
   };
+
+  // 在客户端挂载前不渲染内容，避免 hydration 错误
+  // 注意：这个检查必须在所有 hooks 定义之后
+  if (!mounted) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">
+        <div className="container mx-auto px-4 py-6 flex items-center justify-center min-h-[50vh]">
+          <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">
@@ -696,7 +709,7 @@ export default function Home() {
                         {extractedStudies.map((study) => (
                           <TableRow key={study.id}>
                             <TableCell>
-                              <input type="checkbox" checked={selectedStudies.has(study.id)} onChange={() => toggleStudySelection(study.id)} className="h-4 w-4" />
+                              <input type="checkbox" checked={selectedStudies.includes(study.id)} onChange={() => toggleStudySelection(study.id)} className="h-4 w-4" />
                             </TableCell>
                             <TableCell className="font-medium">{study.study_name || '未命名'}</TableCell>
                             <TableCell>{study.sample_size_treatment && study.sample_size_control ? `${study.sample_size_treatment}/${study.sample_size_control}` : '-'}</TableCell>
@@ -708,7 +721,7 @@ export default function Home() {
                       </TableBody>
                     </Table>
 
-                    {selectedStudies.size >= 2 && (
+                    {selectedStudies.length >= 2 && (
                       <Card className="bg-slate-50 dark:bg-slate-800">
                         <CardHeader><CardTitle className="text-base">创建Meta分析</CardTitle></CardHeader>
                         <CardContent className="space-y-4">
@@ -724,7 +737,7 @@ export default function Home() {
                           <div className="space-y-2"><Label>描述（可选）</Label><Textarea value={analysisDescription} onChange={(e) => setAnalysisDescription(e.target.value)} placeholder="描述本次分析的目的和方法" /></div>
                           <Button onClick={createAnalysis} disabled={creatingAnalysis || !analysisName.trim()}>
                             {creatingAnalysis ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BarChart3 className="mr-2 h-4 w-4" />}
-                            开始分析 ({selectedStudies.size}项研究)
+                            开始分析 ({selectedStudies.length}项研究)
                           </Button>
                         </CardContent>
                       </Card>
@@ -775,7 +788,7 @@ export default function Home() {
                                 <TrendingUp className="h-4 w-4" />
                                 漏斗图 (发表偏倚检验)
                               </h4>
-                              {!funnelPlotData.has(analysis.id) && (
+                              {!funnelPlotData[analysis.id] && (
                                 <Button 
                                   variant="outline" 
                                   size="sm" 
@@ -792,8 +805,8 @@ export default function Home() {
                               )}
                             </div>
                             
-                            {funnelPlotData.has(analysis.id) && (
-                              <FunnelPlotDisplay data={funnelPlotData.get(analysis.id)!} />
+                            {funnelPlotData[analysis.id] && (
+                              <FunnelPlotDisplay data={funnelPlotData[analysis.id]} />
                             )}
                           </div>
                           
