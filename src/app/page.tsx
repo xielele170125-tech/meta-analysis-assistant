@@ -32,7 +32,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet } from 'lucide-react';
+import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet, Code2, TriangleAlert, TrendingUp } from 'lucide-react';
 
 // 类型定义
 interface Literature {
@@ -106,6 +106,50 @@ interface ImportResult {
   records: ImportResultRecord[];
 }
 
+interface FunnelPlotData {
+  studyId: string;
+  studyName: string;
+  effectSize: number;
+  se: number;
+  weight: number;
+}
+
+interface FunnelPlotResult {
+  studies: FunnelPlotData[];
+  pooledEffect: number;
+  pooledSe: number;
+  pooledCI: [number, number];
+  asymmetryTest: {
+    egger: {
+      intercept: number;
+      se: number;
+      pValue: number;
+    };
+    begg: {
+      tau: number;
+      pValue: number;
+    };
+  };
+  trimFill?: {
+    missingStudies: number;
+    adjustedEffect: number;
+    adjustedCI: [number, number];
+  };
+  heterogeneity: {
+    q: number;
+    qPValue: number;
+    i2: number;
+    tau2: number;
+  };
+}
+
+interface RCodeResult {
+  rCode: string;
+  studyCount: number;
+  analysisName: string;
+  modelType: string;
+}
+
 export default function Home() {
   const [apiKey, setApiKey] = useState('');
   const [showSettings, setShowSettings] = useState(false);
@@ -124,6 +168,11 @@ export default function Home() {
   const [analysisDescription, setAnalysisDescription] = useState('');
   const [modelType, setModelType] = useState('random');
   const [selectedLiterature, setSelectedLiterature] = useState<Literature | null>(null);
+  const [funnelPlotData, setFunnelPlotData] = useState<Map<string, FunnelPlotResult>>(new Map());
+  const [showRCode, setShowRCode] = useState(false);
+  const [rCodeData, setRCodeData] = useState<RCodeResult | null>(null);
+  const [loadingFunnelPlot, setLoadingFunnelPlot] = useState<string | null>(null);
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   useEffect(() => {
     const savedKey = localStorage.getItem('deepseek_api_key');
@@ -385,6 +434,79 @@ export default function Home() {
     }
   };
 
+  // 导出Excel
+  const exportExcel = async (analysisId?: string) => {
+    setExportingExcel(true);
+    try {
+      const url = analysisId 
+        ? `/api/export/excel?analysisId=${analysisId}`
+        : '/api/export/excel';
+      
+      const res = await fetch(url);
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || '导出失败');
+      }
+      
+      const blob = await res.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = 'meta_analysis_data.xlsx';
+      a.click();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '导出失败');
+    } finally {
+      setExportingExcel(false);
+    }
+  };
+
+  // 生成R代码
+  const generateRCode = async (analysisId: string) => {
+    try {
+      const res = await fetch(`/api/export/r-code?analysisId=${analysisId}`);
+      const data = await res.json();
+      
+      if (!data.success) {
+        throw new Error(data.error || '生成失败');
+      }
+      
+      setRCodeData(data.data);
+      setShowRCode(true);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '生成R代码失败');
+    }
+  };
+
+  // 加载漏斗图数据
+  const loadFunnelPlot = async (analysisId: string) => {
+    setLoadingFunnelPlot(analysisId);
+    try {
+      const res = await fetch(`/api/analysis/funnel-plot?analysisId=${analysisId}`);
+      const data = await res.json();
+      
+      if (!data.success) {
+        throw new Error(data.error || '获取漏斗图数据失败');
+      }
+      
+      setFunnelPlotData(prev => new Map(prev).set(analysisId, data.data));
+    } catch (error) {
+      console.error('Load funnel plot error:', error);
+      alert(error instanceof Error ? error.message : '获取漏斗图数据失败');
+    } finally {
+      setLoadingFunnelPlot(null);
+    }
+  };
+
+  // 复制R代码到剪贴板
+  const copyRCode = async () => {
+    if (rCodeData?.rCode) {
+      await navigator.clipboard.writeText(rCodeData.rCode);
+      alert('R代码已复制到剪贴板');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">
       <header className="border-b bg-white/80 backdrop-blur-sm dark:bg-slate-900/80">
@@ -533,7 +655,24 @@ export default function Home() {
 
           <TabsContent value="data">
             <Card>
-              <CardHeader><CardTitle>提取的数据</CardTitle><CardDescription>选择研究进行Meta分析</CardDescription></CardHeader>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>提取的数据</CardTitle>
+                    <CardDescription>选择研究进行Meta分析</CardDescription>
+                  </div>
+                  {extractedStudies.length > 0 && (
+                    <Button variant="outline" size="sm" onClick={() => exportExcel()} disabled={exportingExcel}>
+                      {exportingExcel ? (
+                        <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                      ) : (
+                        <FileSpreadsheet className="h-4 w-4 mr-1" />
+                      )}
+                      导出Excel
+                    </Button>
+                  )}
+                </div>
+              </CardHeader>
               <CardContent>
                 {extractedStudies.length === 0 ? (
                   <div className="text-center py-12">
@@ -606,7 +745,15 @@ export default function Home() {
                     <CardHeader>
                       <div className="flex items-center justify-between">
                         <div><CardTitle>{analysis.name}</CardTitle><CardDescription>{analysis.description}</CardDescription></div>
-                        <Badge>{analysis.model_type === 'random' ? '随机效应' : '固定效应'}</Badge>
+                        <div className="flex items-center gap-2">
+                          <Badge>{analysis.model_type === 'random' ? '随机效应' : '固定效应'}</Badge>
+                          <Button variant="outline" size="sm" onClick={() => exportExcel(analysis.id)} disabled={exportingExcel}>
+                            <FileSpreadsheet className="h-4 w-4 mr-1" /> 导出Excel
+                          </Button>
+                          <Button variant="outline" size="sm" onClick={() => generateRCode(analysis.id)}>
+                            <Code2 className="h-4 w-4 mr-1" /> R代码
+                          </Button>
+                        </div>
                       </div>
                     </CardHeader>
                     <CardContent>
@@ -618,7 +765,38 @@ export default function Home() {
                             <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-lg"><p className="text-sm text-slate-500">I² (异质性)</p><p className="text-2xl font-bold">{(analysis.result.heterogeneity_i2 * 100).toFixed(1)}%</p></div>
                             <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-lg"><p className="text-sm text-slate-500">P值</p><p className="text-2xl font-bold">{analysis.result.combined_p_value < 0.001 ? '<0.001' : analysis.result.combined_p_value.toFixed(3)}</p></div>
                           </div>
+                          
                           <div><h4 className="font-semibold mb-4">森林图</h4><ForestPlot data={analysis.result.forest_plot_data} /></div>
+                          
+                          {/* 漏斗图 */}
+                          <div>
+                            <div className="flex items-center justify-between mb-4">
+                              <h4 className="font-semibold flex items-center gap-2">
+                                <TrendingUp className="h-4 w-4" />
+                                漏斗图 (发表偏倚检验)
+                              </h4>
+                              {!funnelPlotData.has(analysis.id) && (
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  onClick={() => loadFunnelPlot(analysis.id)}
+                                  disabled={loadingFunnelPlot === analysis.id}
+                                >
+                                  {loadingFunnelPlot === analysis.id ? (
+                                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                  ) : (
+                                    <TrendingUp className="h-4 w-4 mr-1" />
+                                  )}
+                                  生成漏斗图
+                                </Button>
+                              )}
+                            </div>
+                            
+                            {funnelPlotData.has(analysis.id) && (
+                              <FunnelPlotDisplay data={funnelPlotData.get(analysis.id)!} />
+                            )}
+                          </div>
+                          
                           <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
                             <h4 className="font-semibold mb-2 flex items-center gap-2"><AlertCircle className="h-4 w-4" /> 结果解释</h4>
                             <p className="text-sm text-slate-600 dark:text-slate-300">
@@ -717,6 +895,44 @@ export default function Home() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* R代码弹窗 */}
+      <Dialog open={showRCode} onOpenChange={setShowRCode}>
+        <DialogContent className="max-w-4xl max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Code2 className="h-5 w-5" />
+              R语言Meta分析代码
+            </DialogTitle>
+            <DialogDescription>
+              将以下代码复制到RStudio中运行，生成森林图和漏斗图
+            </DialogDescription>
+          </DialogHeader>
+          {rCodeData && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between text-sm text-slate-500">
+                <span>研究数量: {rCodeData.studyCount}</span>
+                <span>模型类型: {rCodeData.modelType === 'random' ? '随机效应模型' : '固定效应模型'}</span>
+              </div>
+              <div className="flex justify-end">
+                <Button variant="outline" size="sm" onClick={copyRCode}>
+                  <Download className="h-4 w-4 mr-1" /> 复制代码
+                </Button>
+              </div>
+              <ScrollArea className="h-[400px]">
+                <pre className="text-xs bg-slate-100 dark:bg-slate-800 p-4 rounded-lg overflow-x-auto whitespace-pre-wrap font-mono">
+                  {rCodeData.rCode}
+                </pre>
+              </ScrollArea>
+              <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                <p className="text-sm text-slate-600 dark:text-slate-300">
+                  <strong>使用说明:</strong> 请确保已安装 R 和必要的包 (meta, metafor, ggplot2)。首次运行时会自动安装缺失的包。
+                </p>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -758,6 +974,177 @@ function ForestPlot({ data }: { data: Array<{ id: string; studyName: string; eff
           <span>{minVal.toFixed(2)}</span><span>0 (无效应)</span><span>{maxVal.toFixed(2)}</span>
         </div>
       </div>
+    </div>
+  );
+}
+
+// 漏斗图组件
+function FunnelPlotDisplay({ data }: { data: FunnelPlotResult }) {
+  const { studies, pooledEffect, asymmetryTest, heterogeneity } = data;
+  
+  // 计算图形范围
+  const allEffects = studies.map(s => s.effectSize);
+  const minEffect = Math.min(...allEffects, pooledEffect - 0.5);
+  const maxEffect = Math.max(...allEffects, pooledEffect + 0.5);
+  const maxSe = Math.max(...studies.map(s => s.se));
+  
+  // SVG尺寸
+  const width = 600;
+  const height = 400;
+  const margin = { top: 40, right: 40, bottom: 50, left: 60 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  
+  // 坐标转换
+  const xScale = (effect: number) => margin.left + ((effect - minEffect) / (maxEffect - minEffect)) * plotWidth;
+  const yScale = (se: number) => margin.top + (se / maxSe) * plotHeight;
+  
+  // 计算漏斗形状的边界
+  const funnelPoints = [];
+  for (let se = 0; se <= maxSe; se += maxSe / 20) {
+    const ci = 1.96 * se;
+    funnelPoints.push({
+      left: { x: xScale(pooledEffect - ci), y: yScale(se) },
+      right: { x: xScale(pooledEffect + ci), y: yScale(se) },
+    });
+  }
+  
+  // 判断是否存在发表偏倚
+  const hasBias = asymmetryTest.egger.pValue < 0.1 || asymmetryTest.begg.pValue < 0.1;
+  
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-center overflow-x-auto">
+        <svg width={width} height={height} className="border rounded-lg bg-white">
+          {/* 背景网格 */}
+          <defs>
+            <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">
+              <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#e5e7eb" strokeWidth="0.5"/>
+            </pattern>
+          </defs>
+          <rect x={margin.left} y={margin.top} width={plotWidth} height={plotHeight} fill="url(#grid)" />
+          
+          {/* 漏斗形状 (95% CI区域) */}
+          <path
+            d={`M ${xScale(pooledEffect)} ${margin.top}
+                L ${funnelPoints[funnelPoints.length - 1].left.x} ${funnelPoints[funnelPoints.length - 1].left.y}
+                L ${funnelPoints[funnelPoints.length - 1].right.x} ${funnelPoints[funnelPoints.length - 1].right.y}
+                Z`}
+            fill="rgba(59, 130, 246, 0.1)"
+            stroke="rgba(59, 130, 246, 0.3)"
+            strokeWidth="1"
+          />
+          
+          {/* 合并效应量垂直线 */}
+          <line
+            x1={xScale(pooledEffect)}
+            y1={margin.top}
+            x2={xScale(pooledEffect)}
+            y2={margin.top + plotHeight}
+            stroke="#3b82f6"
+            strokeWidth="2"
+            strokeDasharray="5,5"
+          />
+          
+          {/* 坐标轴 */}
+          <line x1={margin.left} y1={margin.top + plotHeight} x2={margin.left + plotWidth} y2={margin.top + plotHeight} stroke="#64748b" strokeWidth="1" />
+          <line x1={margin.left} y1={margin.top} x2={margin.left} y2={margin.top + plotHeight} stroke="#64748b" strokeWidth="1" />
+          
+          {/* X轴刻度和标签 */}
+          {[minEffect, (minEffect + maxEffect) / 2, maxEffect].map((val, i) => (
+            <g key={i}>
+              <line x1={xScale(val)} y1={margin.top + plotHeight} x2={xScale(val)} y2={margin.top + plotHeight + 5} stroke="#64748b" strokeWidth="1" />
+              <text x={xScale(val)} y={margin.top + plotHeight + 20} textAnchor="middle" className="text-xs fill-slate-500">
+                {val.toFixed(2)}
+              </text>
+            </g>
+          ))}
+          <text x={margin.left + plotWidth / 2} y={height - 10} textAnchor="middle" className="text-sm fill-slate-600 font-medium">
+            效应量
+          </text>
+          
+          {/* Y轴刻度和标签 */}
+          {[0, maxSe / 2, maxSe].map((val, i) => (
+            <g key={i}>
+              <line x1={margin.left - 5} y1={yScale(val)} x2={margin.left} y2={yScale(val)} stroke="#64748b" strokeWidth="1" />
+              <text x={margin.left - 10} y={yScale(val) + 4} textAnchor="end" className="text-xs fill-slate-500">
+                {val.toFixed(2)}
+              </text>
+            </g>
+          ))}
+          <text x={15} y={margin.top + plotHeight / 2} textAnchor="middle" transform={`rotate(-90, 15, ${margin.top + plotHeight / 2})`} className="text-sm fill-slate-600 font-medium">
+            标准误 (SE)
+          </text>
+          
+          {/* 研究点 */}
+          {studies.map((study, i) => (
+            <g key={study.studyId}>
+              <circle
+                cx={xScale(study.effectSize)}
+                cy={yScale(study.se)}
+                r={Math.max(4, Math.min(8, study.weight / 10))}
+                fill="#3b82f6"
+                stroke="white"
+                strokeWidth="1.5"
+                opacity={0.8}
+                className="hover:opacity-100 cursor-pointer"
+              >
+                <title>{`${study.studyName}\n效应量: ${study.effectSize.toFixed(3)}\nSE: ${study.se.toFixed(3)}`}</title>
+              </circle>
+            </g>
+          ))}
+        </svg>
+      </div>
+      
+      {/* 统计检验结果 */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
+          <p className="text-sm text-slate-500 mb-1">Egger回归检验</p>
+          <p className="font-semibold">截距: {asymmetryTest.egger.intercept.toFixed(3)} (SE: {asymmetryTest.egger.se.toFixed(3)})</p>
+          <p className={`text-sm ${asymmetryTest.egger.pValue < 0.1 ? 'text-red-500' : 'text-green-500'}`}>
+            P = {asymmetryTest.egger.pValue.toFixed(3)} {asymmetryTest.egger.pValue < 0.1 ? '(可能存在偏倚)' : '(无显著偏倚)'}
+          </p>
+        </div>
+        <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
+          <p className="text-sm text-slate-500 mb-1">Begg秩相关检验</p>
+          <p className="font-semibold">Tau: {asymmetryTest.begg.tau.toFixed(3)}</p>
+          <p className={`text-sm ${asymmetryTest.begg.pValue < 0.1 ? 'text-red-500' : 'text-green-500'}`}>
+            P = {asymmetryTest.begg.pValue.toFixed(3)} {asymmetryTest.begg.pValue < 0.1 ? '(可能存在偏倚)' : '(无显著偏倚)'}
+          </p>
+        </div>
+        <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
+          <p className="text-sm text-slate-500 mb-1">异质性</p>
+          <p className="font-semibold">Q = {heterogeneity.q.toFixed(2)}, I² = {(heterogeneity.i2 * 100).toFixed(1)}%</p>
+          <p className="text-sm text-slate-500">τ² = {heterogeneity.tau2.toFixed(4)}</p>
+        </div>
+      </div>
+      
+      {/* 发表偏倚警告 */}
+      {hasBias && (
+        <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-200 dark:border-yellow-800">
+          <div className="flex items-start gap-2">
+            <TriangleAlert className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-yellow-800 dark:text-yellow-200">可能存在发表偏倚</p>
+              <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-1">
+                统计检验提示漏斗图可能存在不对称，建议进一步调查潜在的发表偏倚。
+                可考虑使用Trim and Fill方法进行校正，或进行敏感性分析。
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Trim and Fill结果 */}
+      {data.trimFill && data.trimFill.missingStudies > 0 && (
+        <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+          <p className="font-semibold mb-2">Trim and Fill 校正</p>
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            估计缺失研究数: {data.trimFill.missingStudies} 篇<br/>
+            调整后效应量: {data.trimFill.adjustedEffect.toFixed(3)} [{data.trimFill.adjustedCI[0].toFixed(3)}, {data.trimFill.adjustedCI[1].toFixed(3)}]
+          </p>
+        </div>
+      )}
     </div>
   );
 }
