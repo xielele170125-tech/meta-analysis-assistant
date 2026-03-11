@@ -1052,12 +1052,15 @@ export default function Home() {
                     </div>
                     <div className="w-[200px]">
                       <Label className="text-sm text-slate-500 mb-1 block">结局指标类型</Label>
-                      <Select value={searchOutcomeType} onValueChange={setSearchOutcomeType}>
+                      <Select 
+                        value={searchOutcomeType || "all"} 
+                        onValueChange={(v) => setSearchOutcomeType(v === "all" ? "" : v)}
+                      >
                         <SelectTrigger>
                           <SelectValue placeholder="全部类型" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">全部类型</SelectItem>
+                          <SelectItem value="all">全部类型</SelectItem>
                           {uniqueOutcomeTypes.map(type => (
                             <SelectItem key={type} value={type}>{type}</SelectItem>
                           ))}
