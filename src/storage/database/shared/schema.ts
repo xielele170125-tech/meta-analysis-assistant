@@ -77,7 +77,11 @@ export const extractedData = pgTable(
     eventsTreatmentName: varchar("events_treatment_name", { length: 255 }),
     eventsControlName: varchar("events_control_name", { length: 255 }),
     // 元信息
-    outcomeType: varchar("outcome_type", { length: 100 }), // 结局类型
+    outcomeType: varchar("outcome_type", { length: 100 }), // 结局类型（保留原始）
+    outcomeTypeRaw: varchar("outcome_type_raw", { length: 255 }), // 原始结局指标名称
+    outcomeTypeStandardized: varchar("outcome_type_standardized", { length: 100 }), // 标准化结局指标名称
+    subgroup: varchar("subgroup", { length: 255 }), // 亚组名称（如"高龄组"、"年轻组"）
+    subgroupDetail: text("subgroup_detail"), // 亚组详细描述
     notes: text("notes"),
     confidence: real("confidence"), // AI 提取置信度
     createdAt: timestamp("created_at", { withTimezone: true })

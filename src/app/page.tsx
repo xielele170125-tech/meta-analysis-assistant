@@ -69,6 +69,10 @@ interface ExtractedStudy {
   events_control: number | null;
   events_control_name: string | null;
   outcome_type: string | null;
+  outcome_type_raw: string | null;
+  outcome_type_standardized: string | null;
+  subgroup: string | null;
+  subgroup_detail: string | null;
   confidence: number | null;
   notes: string | null;
 }
@@ -187,6 +191,7 @@ export default function Home() {
   // 数据搜索和对比相关状态
   const [searchKeyword, setSearchKeyword] = useState('');
   const [searchOutcomeType, setSearchOutcomeType] = useState('');
+  const [searchSubgroup, setSearchSubgroup] = useState('');
   const [compareStudies, setCompareStudies] = useState<string[]>([]);
   const [compareResult, setCompareResult] = useState<{
     outcomeType: string;
@@ -469,19 +474,33 @@ export default function Home() {
     const keywordMatch = !searchKeyword || 
       study.study_name?.toLowerCase().includes(searchKeyword.toLowerCase()) ||
       study.outcome_type?.toLowerCase().includes(searchKeyword.toLowerCase()) ||
+      study.outcome_type_raw?.toLowerCase().includes(searchKeyword.toLowerCase()) ||
+      study.outcome_type_standardized?.toLowerCase().includes(searchKeyword.toLowerCase()) ||
       study.sample_size_treatment_name?.toLowerCase().includes(searchKeyword.toLowerCase()) ||
-      study.events_treatment_name?.toLowerCase().includes(searchKeyword.toLowerCase());
+      study.events_treatment_name?.toLowerCase().includes(searchKeyword.toLowerCase()) ||
+      study.subgroup?.toLowerCase().includes(searchKeyword.toLowerCase());
     
     const outcomeMatch = !searchOutcomeType || 
-      study.outcome_type?.toLowerCase().includes(searchOutcomeType.toLowerCase());
+      study.outcome_type?.toLowerCase().includes(searchOutcomeType.toLowerCase()) ||
+      study.outcome_type_standardized?.toLowerCase().includes(searchOutcomeType.toLowerCase());
     
-    return keywordMatch && outcomeMatch;
+    const subgroupMatch = !searchSubgroup || 
+      study.subgroup?.toLowerCase().includes(searchSubgroup.toLowerCase());
+    
+    return keywordMatch && outcomeMatch && subgroupMatch;
   });
 
   // 获取所有唯一的结局指标类型
   const uniqueOutcomeTypes = Array.from(new Set(
     extractedStudies
       .map(s => s.outcome_type)
+      .filter((v): v is string => !!v)
+  ));
+
+  // 获取所有唯一的亚组
+  const uniqueSubgroups = Array.from(new Set(
+    extractedStudies
+      .map(s => s.subgroup)
       .filter((v): v is string => !!v)
   ));
 
@@ -960,6 +979,7 @@ export default function Home() {
                           <TableHead>效应量</TableHead>
                           <TableHead>95% CI</TableHead>
                           <TableHead>结局指标</TableHead>
+                          <TableHead>亚组</TableHead>
                           <TableHead>置信度</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -992,7 +1012,27 @@ export default function Home() {
                             </TableCell>
                             <TableCell>{study.effect_size !== null ? study.effect_size.toFixed(3) : '-'}</TableCell>
                             <TableCell>{study.ci_lower !== null && study.ci_upper !== null ? `[${study.ci_lower.toFixed(3)}, ${study.ci_upper.toFixed(3)}]` : '-'}</TableCell>
-                            <TableCell className="max-w-[150px] truncate" title={study.outcome_type || ''}>{study.outcome_type || '-'}</TableCell>
+                            <TableCell>
+                              <div className="max-w-[150px]">
+                                <div className="truncate font-medium" title={study.outcome_type || ''}>{study.outcome_type || '-'}</div>
+                                {study.outcome_type_raw && study.outcome_type_standardized && 
+                                 study.outcome_type_raw !== study.outcome_type_standardized && (
+                                  <div className="text-xs text-slate-400 truncate" title={`原始名称: ${study.outcome_type_raw}`}>
+                                    原始: {study.outcome_type_raw}
+                                  </div>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              {study.subgroup ? (
+                                <div className="max-w-[120px]">
+                                  <div className="truncate text-sm font-medium" title={study.subgroup}>{study.subgroup}</div>
+                                  {study.subgroup_detail && (
+                                    <div className="text-xs text-slate-400 truncate" title={study.subgroup_detail}>{study.subgroup_detail}</div>
+                                  )}
+                                </div>
+                              ) : '-'}
+                            </TableCell>
                             <TableCell>{study.confidence !== null ? `${(study.confidence * 100).toFixed(0)}%` : '-'}</TableCell>
                           </TableRow>
                         ))}
@@ -1044,7 +1084,7 @@ export default function Home() {
                     <div className="flex-1 min-w-[200px]">
                       <Label className="text-sm text-slate-500 mb-1 block">关键词搜索</Label>
                       <Input
-                        placeholder="搜索研究名称、结局指标、样本量名称..."
+                        placeholder="搜索研究名称、结局指标、亚组..."
                         value={searchKeyword}
                         onChange={(e) => setSearchKeyword(e.target.value)}
                         className="w-full"
@@ -1063,6 +1103,23 @@ export default function Home() {
                           <SelectItem value="all">全部类型</SelectItem>
                           {uniqueOutcomeTypes.map(type => (
                             <SelectItem key={type} value={type}>{type}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="w-[200px]">
+                      <Label className="text-sm text-slate-500 mb-1 block">亚组</Label>
+                      <Select 
+                        value={searchSubgroup || "all"} 
+                        onValueChange={(v) => setSearchSubgroup(v === "all" ? "" : v)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="全部亚组" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">全部亚组</SelectItem>
+                          {uniqueSubgroups.map(group => (
+                            <SelectItem key={group} value={group}>{group}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -1114,6 +1171,7 @@ export default function Home() {
                           <TableHead className="w-12">对比</TableHead>
                           <TableHead>研究名称</TableHead>
                           <TableHead>结局指标</TableHead>
+                          <TableHead>亚组</TableHead>
                           <TableHead>样本量 (治疗/对照)</TableHead>
                           <TableHead>事件数 (治疗/对照)</TableHead>
                           <TableHead>效应量</TableHead>
@@ -1135,9 +1193,33 @@ export default function Home() {
                             </TableCell>
                             <TableCell className="font-medium">{study.study_name || '未命名'}</TableCell>
                             <TableCell>
-                              <Badge variant="secondary" className="text-xs">
-                                {study.outcome_type || '未分类'}
-                              </Badge>
+                              <div className="max-w-[150px]">
+                                <div className="truncate font-medium" title={study.outcome_type || ''}>
+                                  <Badge variant="secondary" className="text-xs">
+                                    {study.outcome_type || '未分类'}
+                                  </Badge>
+                                </div>
+                                {study.outcome_type_raw && study.outcome_type_standardized && 
+                                 study.outcome_type_raw !== study.outcome_type_standardized && (
+                                  <div className="text-xs text-slate-400 mt-1 truncate" title={`原始名称: ${study.outcome_type_raw}`}>
+                                    原始: {study.outcome_type_raw}
+                                  </div>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              {study.subgroup ? (
+                                <div className="max-w-[120px]">
+                                  <Badge variant="outline" className="text-xs truncate max-w-full" title={study.subgroup}>
+                                    {study.subgroup}
+                                  </Badge>
+                                  {study.subgroup_detail && (
+                                    <div className="text-xs text-slate-400 mt-1 truncate" title={study.subgroup_detail}>
+                                      {study.subgroup_detail}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : '-'}
                             </TableCell>
                             <TableCell>
                               {study.sample_size_treatment && study.sample_size_control ? (
