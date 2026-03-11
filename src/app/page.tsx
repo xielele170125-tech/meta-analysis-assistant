@@ -622,19 +622,29 @@ export default function Home() {
                       <label htmlFor="auto-pdf" className="text-sm text-slate-600 cursor-pointer">自动下载PDF</label>
                     </div>
                     <input type="file" id="import-file" className="hidden" accept=".ris,.txt,.xml" onChange={handleImport} disabled={importing} />
-                    <Button variant="outline" asChild disabled={importing}>
-                      <label htmlFor="import-file" className="cursor-pointer">
-                        {importing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
-                        {importing ? '导入中...' : '导入EndNote'}
-                      </label>
+                    <Button 
+                      variant="outline"
+                      onClick={() => document.getElementById('import-file')?.click()}
+                      disabled={importing}
+                    >
+                      {importing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
+                      {importing ? '导入中...' : '导入EndNote'}
                     </Button>
                     {/* 上传PDF按钮 */}
-                    <input type="file" id="file-upload" className="hidden" accept=".pdf,.doc,.docx" onChange={handleUpload} disabled={uploading || !apiKey} />
-                    <Button asChild disabled={uploading || !apiKey}>
-                      <label htmlFor="file-upload" className="cursor-pointer">
-                        {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileUp className="mr-2 h-4 w-4" />}
-                        {uploading ? '上传中...' : '上传PDF'}
-                      </label>
+                    <input type="file" id="file-upload" className="hidden" accept=".pdf,.doc,.docx" onChange={handleUpload} disabled={uploading} />
+                    <Button 
+                      onClick={() => {
+                        if (!apiKey) {
+                          alert('请先在设置中配置 DeepSeek API Key');
+                          setShowSettings(true);
+                          return;
+                        }
+                        document.getElementById('file-upload')?.click();
+                      }}
+                      disabled={uploading}
+                    >
+                      {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileUp className="mr-2 h-4 w-4" />}
+                      {uploading ? '上传中...' : '上传PDF'}
                     </Button>
                   </div>
                 </div>
