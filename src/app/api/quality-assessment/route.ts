@@ -264,7 +264,52 @@ export async function POST(request: NextRequest) {
     }
 
     if (!literature.raw_content) {
-      return NextResponse.json({ error: '文献内容为空，无法进行评估' }, { status: 400 });
+      // 尝试重新解析文件
+      if (!literature.file_key) {
+        return NextResponse.json({ error: '文献内容为空且无文件，无法进行评估' }, { status: 400 });
+      }
+      
+      try {
+        // 重新获取文件URL
+        const { S3Storage, FetchClient, Config } = await import('coze-coding-dev-sdk');
+        const storage = new S3Storage({
+          endpointUrl: process.env.COZE_BUCKET_ENDPOINT_URL,
+          accessKey: '',
+          secretKey: '',
+          bucketName: process.env.COZE_BUCKET_NAME,
+          region: 'cn-beijing',
+        });
+        
+        const fileUrl = await storage.generatePresignedUrl({
+          key: literature.file_key,
+          expireTime: 3600,
+        });
+        
+        // 使用 FetchClient 重新解析文件
+        const config = new Config();
+        const fetchClient = new FetchClient(config);
+        const fetchResult = await fetchClient.fetch(fileUrl);
+        
+        const rawContent = fetchResult.content
+          .filter((item) => item.type === 'text')
+          .map((item) => item.text)
+          .join('\n') || '';
+        
+        if (!rawContent) {
+          return NextResponse.json({ error: '无法从文件中提取内容' }, { status: 400 });
+        }
+        
+        // 更新文献的 raw_content
+        await client
+          .from('literature')
+          .update({ raw_content: rawContent })
+          .eq('id', literatureId);
+        
+        literature.raw_content = rawContent;
+      } catch (parseError) {
+        console.error('Re-parse error:', parseError);
+        return NextResponse.json({ error: '文献内容为空，尝试重新解析失败' }, { status: 400 });
+      }
     }
 
     // 选择对应的提示词

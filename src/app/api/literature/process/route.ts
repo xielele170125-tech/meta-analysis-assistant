@@ -287,6 +287,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '无法提取有效文本内容' }, { status: 400 });
     }
 
+    // 保存解析内容到数据库
+    await client
+      .from('literature')
+      .update({ raw_content: textContent })
+      .eq('id', literatureId);
+
     // 更新状态为提取中
     await client
       .from('literature')
