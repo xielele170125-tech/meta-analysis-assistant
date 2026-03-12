@@ -32,7 +32,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet, Code2, TriangleAlert, TrendingUp, Search, GitCompare, Info, RefreshCw } from 'lucide-react';
+import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet, Code2, TriangleAlert, TrendingUp, Search, GitCompare, Info, RefreshCw, ClipboardCheck, Star, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 // 类型定义
 interface Literature {
@@ -46,6 +46,31 @@ interface Literature {
   status: string;
   error_message: string | null;
   created_at: string;
+}
+
+// 质量评分相关类型
+interface QualityDomain {
+  name: string;
+  judgment?: 'low' | 'some_concerns' | 'high';
+  max_stars?: number;
+  earned_stars?: number;
+  questions?: Record<string, { question: string; answer: string; judgment?: string; stars?: number }>;
+  reason?: string;
+}
+
+interface QualityAssessment {
+  id: string;
+  literature_id: string;
+  scale_type: 'rob2' | 'nos' | 'quadas2';
+  study_type?: string;
+  total_score?: number;
+  max_score?: number;
+  domain_scores?: Record<string, QualityDomain>;
+  overall_risk: 'low' | 'some_concerns' | 'high';
+  reasoning?: string;
+  confidence?: number;
+  created_at: string;
+  literature?: Literature;
 }
 
 interface ExtractedStudy {
@@ -204,6 +229,13 @@ export default function Home() {
     } | null;
   } | null>(null);
   const [showCompare, setShowCompare] = useState(false);
+  
+  // 质量评分相关状态
+  const [qualityAssessments, setQualityAssessments] = useState<QualityAssessment[]>([]);
+  const [selectedAssessment, setSelectedAssessment] = useState<QualityAssessment | null>(null);
+  const [showQualityDialog, setShowQualityDialog] = useState(false);
+  const [assessingLiterature, setAssessingLiterature] = useState<string | null>(null);
+  const [selectedScaleType, setSelectedScaleType] = useState<'rob2' | 'nos'>('rob2');
 
   useEffect(() => {
     setMounted(true);
@@ -263,11 +295,23 @@ export default function Home() {
     }
   }, []);
 
+  // 加载质量评分数据
+  const loadQualityAssessments = useCallback(async () => {
+    try {
+      const res = await fetch('/api/quality-assessment');
+      const data = await res.json();
+      if (data.success) setQualityAssessments(data.data);
+    } catch (error) {
+      console.error('Load quality assessments error:', error);
+    }
+  }, []);
+
   useEffect(() => {
     loadLiterature();
     loadExtractedData();
     loadAnalyses();
-  }, [loadLiterature, loadExtractedData, loadAnalyses]);
+    loadQualityAssessments();
+  }, [loadLiterature, loadExtractedData, loadAnalyses, loadQualityAssessments]);
 
   const saveApiKey = () => {
     if (apiKey.trim()) {
@@ -419,8 +463,68 @@ export default function Home() {
       await fetch(`/api/literature?id=${id}`, { method: 'DELETE' });
       await loadLiterature();
       await loadExtractedData();
+      await loadQualityAssessments();
     } catch (error) {
       console.error('Delete error:', error);
+    }
+  };
+
+  // 进行质量评分
+  const assessQuality = async (literatureId: string, scaleType: 'rob2' | 'nos') => {
+    if (!apiKey) {
+      alert('请先设置 DeepSeek API Key');
+      return;
+    }
+    
+    setAssessingLiterature(literatureId);
+    try {
+      const res = await fetch('/api/quality-assessment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ literatureId, scaleType, apiKey }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        await loadQualityAssessments();
+        // 显示评估结果
+        const assessment = data.data.assessment;
+        if (assessment) {
+          setSelectedAssessment(assessment);
+          setShowQualityDialog(true);
+        }
+      } else {
+        alert('质量评分失败: ' + data.error);
+      }
+    } catch (error) {
+      console.error('Assess quality error:', error);
+      alert('质量评分失败');
+    } finally {
+      setAssessingLiterature(null);
+    }
+  };
+
+  // 获取文献的质量评分
+  const getLiteratureQuality = (literatureId: string) => {
+    return qualityAssessments.find(a => a.literature_id === literatureId);
+  };
+
+  // 渲染偏倚风险颜色
+  const getRiskColor = (risk: string) => {
+    switch (risk) {
+      case 'low': return 'bg-green-500';
+      case 'some_concerns': return 'bg-yellow-500';
+      case 'high': return 'bg-red-500';
+      default: return 'bg-gray-300';
+    }
+  };
+
+  // 渲染偏倚风险标签
+  const getRiskBadge = (risk: string) => {
+    switch (risk) {
+      case 'low': return <Badge className="bg-green-100 text-green-800 border-green-200"><CheckCircle2 className="h-3 w-3 mr-1" />低风险</Badge>;
+      case 'some_concerns': return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200"><AlertTriangle className="h-3 w-3 mr-1" />有些担忧</Badge>;
+      case 'high': return <Badge className="bg-red-100 text-red-800 border-red-200"><XCircle className="h-3 w-3 mr-1" />高风险</Badge>;
+      default: return <Badge variant="outline">未评估</Badge>;
     }
   };
 
@@ -934,12 +1038,15 @@ export default function Home() {
                           <TableHead>作者</TableHead>
                           <TableHead>年份</TableHead>
                           <TableHead>期刊</TableHead>
+                          <TableHead>质量评分</TableHead>
                           <TableHead>PDF</TableHead>
                           <TableHead>操作</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {literature.map((lit) => (
+                        {literature.map((lit) => {
+                          const quality = getLiteratureQuality(lit.id);
+                          return (
                           <TableRow key={lit.id} className={selectedLiteratureIds.includes(lit.id) ? 'bg-blue-50 dark:bg-blue-900/10' : ''}>
                             <TableCell>
                               <Checkbox
@@ -962,6 +1069,20 @@ export default function Home() {
                               {lit.journal || '-'}
                             </TableCell>
                           <TableCell>
+                            {quality ? (
+                              <div className="flex flex-col gap-1">
+                                {getRiskBadge(quality.overall_risk)}
+                                {quality.total_score !== null && (
+                                  <div className="text-xs text-slate-500">
+                                    {quality.total_score}/{quality.max_score} ★
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <Badge variant="outline" className="text-slate-400">未评估</Badge>
+                            )}
+                          </TableCell>
+                          <TableCell>
                             {lit.file_name ? (
                               <Badge variant="secondary" className="gap-1">
                                 <FileText className="h-3 w-3" /> 已上传
@@ -976,8 +1097,39 @@ export default function Home() {
                                 <Eye className="h-4 w-4" />
                               </Button>
                               {lit.status === 'completed' && (
-                                <Button variant="ghost" size="sm" onClick={() => reextractLiterature(lit.id)} title="重新提取数据">
-                                  <RefreshCw className="h-4 w-4 text-blue-500" />
+                                <>
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm" 
+                                    onClick={() => {
+                                      const scale = quality?.scale_type || selectedScaleType;
+                                      assessQuality(lit.id, scale as 'rob2' | 'nos');
+                                    }} 
+                                    title="质量评分"
+                                    disabled={assessingLiterature === lit.id}
+                                  >
+                                    {assessingLiterature === lit.id ? (
+                                      <Loader2 className="h-4 w-4 animate-spin text-purple-500" />
+                                    ) : (
+                                      <ClipboardCheck className={`h-4 w-4 ${quality ? 'text-green-500' : 'text-purple-500'}`} />
+                                    )}
+                                  </Button>
+                                  <Button variant="ghost" size="sm" onClick={() => reextractLiterature(lit.id)} title="重新提取数据">
+                                    <RefreshCw className="h-4 w-4 text-blue-500" />
+                                  </Button>
+                                </>
+                              )}
+                              {quality && (
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  onClick={() => {
+                                    setSelectedAssessment(quality);
+                                    setShowQualityDialog(true);
+                                  }} 
+                                  title="查看评分详情"
+                                >
+                                  <Info className="h-4 w-4 text-slate-400" />
                                 </Button>
                               )}
                               <Button variant="ghost" size="sm" onClick={() => deleteLiterature(lit.id)} title="删除">
@@ -986,7 +1138,8 @@ export default function Home() {
                             </div>
                           </TableCell>
                         </TableRow>
-                      ))}
+                      );
+                      })}
                     </TableBody>
                   </Table>
                   </>
@@ -1669,6 +1822,160 @@ export default function Home() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* 质量评分详情对话框 */}
+      <Dialog open={showQualityDialog} onOpenChange={setShowQualityDialog}>
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ClipboardCheck className="h-5 w-5" />
+              质量评分详情
+            </DialogTitle>
+            <DialogDescription>
+              {selectedAssessment?.scale_type === 'rob2' ? 'Cochrane RoB 2.0 偏倚风险评估' : 
+               selectedAssessment?.scale_type === 'nos' ? 'Newcastle-Ottawa 量表评分' : '质量评估'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedAssessment && (
+            <div className="space-y-6">
+              {/* 总体风险 */}
+              <Card className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm text-slate-500">总体偏倚风险</div>
+                    <div className="mt-2">
+                      {getRiskBadge(selectedAssessment.overall_risk)}
+                    </div>
+                  </div>
+                  {selectedAssessment.total_score !== null && (
+                    <div className="text-right">
+                      <div className="text-sm text-slate-500">总分</div>
+                      <div className="text-2xl font-bold flex items-center gap-1">
+                        <Star className="h-5 w-5 text-yellow-500 fill-yellow-500" />
+                        {selectedAssessment.total_score}/{selectedAssessment.max_score}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {selectedAssessment.reasoning && (
+                  <div className="mt-4 p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                    <div className="text-sm text-slate-500 mb-1">评估理由</div>
+                    <div className="text-sm">{selectedAssessment.reasoning}</div>
+                  </div>
+                )}
+                {selectedAssessment.confidence && (
+                  <div className="mt-2 text-xs text-slate-400">
+                    AI评估置信度: {(selectedAssessment.confidence * 100).toFixed(0)}%
+                  </div>
+                )}
+              </Card>
+
+              {/* 偏倚风险可视化 (Cochrane风格) */}
+              {selectedAssessment.domain_scores && (
+                <Card className="p-4">
+                  <CardTitle className="text-base mb-4">各域偏倚风险</CardTitle>
+                  
+                  {/* 偏倚风险图 */}
+                  <div className="space-y-2">
+                    {Object.entries(selectedAssessment.domain_scores).map(([key, domain]) => (
+                      <div key={key} className="flex items-center gap-4">
+                        <div className="w-24 text-sm text-slate-600">{domain.name || key}</div>
+                        <div className="flex-1 flex items-center gap-1">
+                          {domain.judgment && (
+                            <div className={`w-8 h-8 rounded flex items-center justify-center ${
+                              domain.judgment === 'low' ? 'bg-green-500' :
+                              domain.judgment === 'some_concerns' ? 'bg-yellow-500' :
+                              'bg-red-500'
+                            }`}>
+                              {domain.judgment === 'low' && <CheckCircle2 className="h-5 w-5 text-white" />}
+                              {domain.judgment === 'some_concerns' && <AlertTriangle className="h-5 w-5 text-white" />}
+                              {domain.judgment === 'high' && <XCircle className="h-5 w-5 text-white" />}
+                            </div>
+                          )}
+                          {domain.earned_stars !== undefined && (
+                            <div className="flex gap-1">
+                              {Array.from({ length: domain.max_stars || 0 }).map((_, i) => (
+                                <Star 
+                                  key={i} 
+                                  className={`h-5 w-5 ${i < (domain.earned_stars || 0) 
+                                    ? 'text-yellow-500 fill-yellow-500' 
+                                    : 'text-slate-300'}`} 
+                                />
+                              ))}
+                            </div>
+                          )}
+                          <span className="text-xs text-slate-500 ml-2">
+                            {domain.judgment === 'low' ? '低风险' :
+                             domain.judgment === 'some_concerns' ? '有些担忧' :
+                             domain.judgment === 'high' ? '高风险' : ''}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+
+              {/* 详细条目 */}
+              {selectedAssessment.domain_scores && (
+                <Card className="p-4">
+                  <CardTitle className="text-base mb-4">详细评估</CardTitle>
+                  <div className="space-y-4">
+                    {Object.entries(selectedAssessment.domain_scores).map(([key, domain]) => (
+                      <div key={key} className="border-b pb-4 last:border-b-0">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="font-medium">{domain.name || key}</span>
+                          {domain.judgment && (
+                            <span className={`text-xs px-2 py-0.5 rounded ${
+                              domain.judgment === 'low' ? 'bg-green-100 text-green-800' :
+                              domain.judgment === 'some_concerns' ? 'bg-yellow-100 text-yellow-800' :
+                              'bg-red-100 text-red-800'
+                            }`}>
+                              {domain.judgment === 'low' ? '低风险' :
+                               domain.judgment === 'some_concerns' ? '有些担忧' : '高风险'}
+                            </span>
+                          )}
+                        </div>
+                        
+                        {domain.questions && (
+                          <div className="space-y-2">
+                            {Object.entries(domain.questions).map(([qKey, q]) => (
+                              <div key={qKey} className="text-sm">
+                                <div className="text-slate-500">{q.question}</div>
+                                <div className="text-slate-700 dark:text-slate-300">{q.answer}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        
+                        {domain.reason && (
+                          <div className="text-sm text-slate-500 mt-2 italic">
+                            理由: {domain.reason}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+
+              {/* 量表说明 */}
+              <div className="text-xs text-slate-400 space-y-1">
+                <p>量表: {selectedAssessment.scale_type === 'rob2' ? 'Cochrane RoB 2.0 - 随机对照试验偏倚风险评估工具' :
+                         selectedAssessment.scale_type === 'nos' ? 'Newcastle-Ottawa量表 - 观察性研究质量评估工具' : '其他'}</p>
+                <p>评估时间: {new Date(selectedAssessment.created_at).toLocaleString()}</p>
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setShowQualityDialog(false)}>
+              关闭
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

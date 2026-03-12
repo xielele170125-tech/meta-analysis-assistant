@@ -169,9 +169,44 @@ export const analysisDataRelation = pgTable(
   ]
 );
 
+// 质量评分表
+export const qualityAssessment = pgTable(
+  "quality_assessment",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    literatureId: varchar("literature_id", { length: 36 }).notNull(),
+    // 量表类型: rob2 (Cochrane RoB 2.0), nos (Newcastle-Ottawa), quadas2 (QUADAS-2)
+    scaleType: varchar("scale_type", { length: 20 }).notNull(),
+    // 研究类型: rct, cohort, case_control, diagnostic
+    studyType: varchar("study_type", { length: 20 }),
+    // 总分（NOS量表使用）
+    totalScore: integer("total_score"),
+    maxScore: integer("max_score"),
+    // 各条目评分详情 (JSON格式)
+    domainScores: jsonb("domain_scores"),
+    // 总体偏倚风险: low, some_concerns, high
+    overallRisk: varchar("overall_risk", { length: 20 }),
+    // AI评估理由
+    reasoning: text("reasoning"),
+    // 评估置信度
+    confidence: real("confidence"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("quality_literature_idx").on(table.literatureId),
+    index("quality_scale_idx").on(table.scaleType),
+  ]
+);
+
 // TypeScript types
 export type Literature = typeof literature.$inferSelect;
 export type ExtractedData = typeof extractedData.$inferSelect;
 export type MetaAnalysis = typeof metaAnalysis.$inferSelect;
 export type AnalysisResult = typeof analysisResult.$inferSelect;
 export type AnalysisDataRelation = typeof analysisDataRelation.$inferSelect;
+export type QualityAssessment = typeof qualityAssessment.$inferSelect;
