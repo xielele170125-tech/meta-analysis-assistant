@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet, Code2, TriangleAlert, TrendingUp, Search, GitCompare, Info, RefreshCw, ClipboardCheck, Star, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import QualityAssessmentTable from '@/components/QualityAssessmentTable';
 
 // 类型定义
 interface Literature {
@@ -942,10 +943,11 @@ export default function Home() {
         )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-4 mb-6">
+          <TabsList className="grid w-full grid-cols-5 mb-6">
             <TabsTrigger value="literature" className="gap-2"><Upload className="h-4 w-4" /> 文献管理</TabsTrigger>
             <TabsTrigger value="data" className="gap-2"><Database className="h-4 w-4" /> 数据提取</TabsTrigger>
             <TabsTrigger value="compare" className="gap-2"><Search className="h-4 w-4" /> 数据对比</TabsTrigger>
+            <TabsTrigger value="quality" className="gap-2"><ClipboardCheck className="h-4 w-4" /> 质量评分</TabsTrigger>
             <TabsTrigger value="analysis" className="gap-2"><BarChart3 className="h-4 w-4" /> Meta分析</TabsTrigger>
           </TabsList>
 
@@ -1624,6 +1626,23 @@ export default function Home() {
                 </DialogContent>
               </Dialog>
             </div>
+          </TabsContent>
+
+          <TabsContent value="quality">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <ClipboardCheck className="h-5 w-5" />
+                  质量评分汇总表
+                </CardTitle>
+                <CardDescription>
+                  基于国际通用量表的文献质量评估，支持导出发表级表格
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <QualityAssessmentTable assessments={qualityAssessments} />
+              </CardContent>
+            </Card>
           </TabsContent>
 
           <TabsContent value="analysis">
