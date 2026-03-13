@@ -170,68 +170,85 @@ export async function POST(request: NextRequest) {
 
       console.log(`[Classify] Found ${validLiterature.length} literature for classification`);
 
-      // 逐个分类
-      const results = [];
-      for (const lit of validLiterature) {
+      // 批量分类（每批 15 篇文献）
+      const BATCH_SIZE = 15;
+      const results: Array<{
+        literatureId: string;
+        title: string;
+        category: string;
+        confidence: number;
+      }> = [];
+
+      // 准备文献数据
+      const literatureData = validLiterature.map(lit => {
+        let content = '';
+        if (lit.raw_content) {
+          try {
+            const raw = JSON.parse(lit.raw_content);
+            content = raw.abstract || lit.raw_content;
+          } catch {
+            content = lit.raw_content;
+          }
+        }
+        return {
+          id: lit.id,
+          title: lit.title || '',
+          content,
+          authors: lit.authors,
+          year: lit.year,
+        };
+      }).filter(lit => lit.title);
+
+      // 分批处理
+      const totalBatches = Math.ceil(literatureData.length / BATCH_SIZE);
+      console.log(`[Classify] Processing ${literatureData.length} literature in ${totalBatches} batches`);
+
+      for (let i = 0; i < literatureData.length; i += BATCH_SIZE) {
+        const batch = literatureData.slice(i, i + BATCH_SIZE);
+        const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+        console.log(`[Classify] Processing batch ${batchNum}/${totalBatches} (${batch.length} literature)`);
+
         try {
-          // 从 raw_content 解析内容
-          let content = '';
-          if (lit.raw_content) {
-            try {
-              const raw = JSON.parse(lit.raw_content);
-              content = raw.abstract || lit.raw_content;
-            } catch {
-              content = lit.raw_content;
-            }
-          }
-          
-          const title = lit.title || '';
+          const batchResults = await batchClassifyLiterature(apiKey, dimension, batch);
 
-          if (!title && !content) {
-            console.log(`[Classify] Literature ${lit.id} has no content`);
-            continue;
-          }
+          // 批量保存分类结果
+          const upsertData = batchResults.map(r => ({
+            literature_id: r.literatureId,
+            dimension_id: dimensionId,
+            category: r.category,
+            confidence: r.confidence,
+            evidence: r.evidence,
+          }));
 
-          // 调用AI进行分类
-          const classification = await classifyLiterature(
-            apiKey,
-            dimension,
-            title,
-            content,
-            lit.authors,
-            lit.year
-          );
-
-          // 保存分类结果
           const { error: upsertError } = await client
             .from('literature_classifications')
-            .upsert({
-              literature_id: lit.id,
-              dimension_id: dimensionId,
-              category: classification.category,
-              confidence: classification.confidence,
-              evidence: classification.evidence,
-            }, { onConflict: 'literature_id,dimension_id' });
+            .upsert(upsertData, { onConflict: 'literature_id,dimension_id' });
 
           if (upsertError) {
-            console.error(`[Classify] Error saving classification for ${lit.id}:`, upsertError);
+            console.error(`[Classify] Batch ${batchNum} upsert error:`, upsertError);
           }
 
-          results.push({
-            literatureId: lit.id,
-            title: lit.title,
-            category: classification.category,
-            confidence: classification.confidence,
+          // 添加到结果列表
+          batchResults.forEach(r => {
+            const lit = validLiterature.find(l => l.id === r.literatureId);
+            results.push({
+              literatureId: r.literatureId,
+              title: lit?.title || '',
+              category: r.category,
+              confidence: r.confidence,
+            });
           });
-        } catch (err) {
-          console.error(`[Classify] Error classifying ${lit.id}:`, err);
+
+          console.log(`[Classify] Batch ${batchNum} completed, ${batchResults.length} classified`);
+        } catch (batchErr) {
+          console.error(`[Classify] Batch ${batchNum} error:`, batchErr);
         }
       }
 
       return NextResponse.json({
         success: true,
         data: {
-          total: literatureList?.length || 0,
+          total: validLiterature.length,
           classified: results.length,
           results,
         },
@@ -540,4 +557,148 @@ ${literatureSummaries}
     console.error('[Recommend] Failed to parse response:', parseError);
     return [];
   }
+}
+
+/**
+ * 批量分类文献（一次 API 调用处理多篇文献）
+ * 性能优化：减少 API 调用次数，从 N 次变成 ceil(N/batchSize) 次
+ */
+async function batchClassifyLiterature(
+  apiKey: string,
+  dimension: { name: string; description?: string; categories: string[] },
+  literatureBatch: Array<{
+    id: string;
+    title: string;
+    content: string;
+    authors?: string;
+    year?: number;
+  }>,
+  batchSize: number = 15
+): Promise<Array<{
+  literatureId: string;
+  category: string;
+  confidence: number;
+  evidence: string;
+}>> {
+  const results: Array<{
+    literatureId: string;
+    category: string;
+    confidence: number;
+    evidence: string;
+  }> = [];
+
+  // 构建文献列表文本
+  const literatureText = literatureBatch.map((lit, idx) => {
+    return `[文献${idx + 1}]
+ID: ${lit.id}
+标题: ${lit.title}
+作者: ${lit.authors || '未知'}
+年份: ${lit.year || '未知'}
+内容摘要: ${lit.content.substring(0, 800)}`;
+  }).join('\n\n');
+
+  const systemPrompt = `你是一位专业的医学文献分析专家。你的任务是根据给定的分类维度，对多篇文献进行批量分类。
+
+## 分类维度
+名称：${dimension.name}
+${dimension.description ? `描述：${dimension.description}` : ''}
+可选分类：${(dimension.categories as string[]).join('、')}
+
+## 输出格式要求
+请以JSON格式返回所有文献的分类结果：
+{
+  "results": [
+    {
+      "literatureId": "文献ID",
+      "category": "选择的分类",
+      "confidence": 0.0-1.0的置信度,
+      "evidence": "从文献中提取的支持该分类的简要证据"
+    }
+  ]
+}
+
+## 注意事项
+1. 每篇文献必须返回一个分类结果
+2. 如果无法确定分类，选择"未说明"或最接近的分类
+3. confidence 表示分类的确定程度，0.5以下表示不确定
+4. evidence 应简要摘录文献中支持该分类的关键信息`;
+
+  const userPrompt = `请对以下 ${literatureBatch.length} 篇文献进行分类：
+
+${literatureText}
+
+请返回JSON格式的分类结果列表。`;
+
+  console.log(`[BatchClassify] Processing ${literatureBatch.length} literature in one API call`);
+
+  const startTime = Date.now();
+  
+  const response = await fetch('https://api.deepseek.com/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: 'deepseek-chat',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature: 0.2,
+      response_format: { type: 'json_object' },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('[BatchClassify] API error:', response.status, errorText);
+    throw new Error(`DeepSeek API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const contentText = data.choices[0]?.message?.content || '{"results":[]}';
+  
+  console.log(`[BatchClassify] API call completed in ${Date.now() - startTime}ms`);
+
+  try {
+    const parsed = JSON.parse(contentText);
+    const parsedResults = parsed.results || [];
+    
+    // 验证并补充缺失的结果
+    for (const lit of literatureBatch) {
+      const found = parsedResults.find((r: any) => r.literatureId === lit.id);
+      if (found) {
+        results.push({
+          literatureId: lit.id,
+          category: found.category || dimension.categories[0],
+          confidence: found.confidence || 0.5,
+          evidence: found.evidence || '',
+        });
+      } else {
+        // 如果 AI 没有返回某篇文献的结果，使用默认值
+        results.push({
+          literatureId: lit.id,
+          category: dimension.categories[dimension.categories.length - 1] || '未知',
+          confidence: 0.3,
+          evidence: 'AI未能返回分类结果',
+        });
+      }
+    }
+    
+    console.log(`[BatchClassify] Parsed ${results.length} results`);
+  } catch (parseError) {
+    console.error('[BatchClassify] Parse error:', parseError);
+    // 解析失败，为所有文献返回默认值
+    for (const lit of literatureBatch) {
+      results.push({
+        literatureId: lit.id,
+        category: dimension.categories[dimension.categories.length - 1] || '未知',
+        confidence: 0.2,
+        evidence: '解析AI响应失败',
+      });
+    }
+  }
+
+  return results;
 }
