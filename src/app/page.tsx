@@ -2082,7 +2082,7 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* 空状态 */}
+                  {/* 空状态 - 无分类维度 */}
                   {classificationDimensions.length === 0 && (
                     <div className="text-center py-12">
                       <Layers className="mx-auto h-12 w-12 text-slate-300 mb-4" />
@@ -2090,8 +2090,58 @@ export default function Home() {
                       <p className="text-sm text-slate-400 mb-4">
                         创建分类维度后，可对文献进行智能分组
                       </p>
-                      <Button onClick={() => setShowNewDimensionDialog(true)}>
-                        <Plus className="mr-2 h-4 w-4" /> 新建分类维度
+                      
+                      {/* 引导流程 */}
+                      <div className="max-w-md mx-auto text-left bg-slate-50 dark:bg-slate-800 p-4 rounded-lg mb-4">
+                        <h4 className="font-medium mb-3 text-center">📚 使用流程</h4>
+                        <div className="space-y-3">
+                          <div className="flex items-start gap-3">
+                            <div className="w-6 h-6 rounded-full bg-blue-500 text-white text-xs flex items-center justify-center flex-shrink-0">1</div>
+                            <div>
+                              <p className="text-sm font-medium">导入文献</p>
+                              <p className="text-xs text-slate-500">在"文献管理"中上传PDF或导入EndNote文件</p>
+                            </div>
+                          </div>
+                          <div className="flex items-start gap-3">
+                            <div className="w-6 h-6 rounded-full bg-blue-500 text-white text-xs flex items-center justify-center flex-shrink-0">2</div>
+                            <div>
+                              <p className="text-sm font-medium">创建分类维度</p>
+                              <p className="text-xs text-slate-500">定义分组标准，如研究类型、样本特征等</p>
+                            </div>
+                          </div>
+                          <div className="flex items-start gap-3">
+                            <div className="w-6 h-6 rounded-full bg-blue-500 text-white text-xs flex items-center justify-center flex-shrink-0">3</div>
+                            <div>
+                              <p className="text-sm font-medium">执行AI分类</p>
+                              <p className="text-xs text-slate-500">AI自动分析文献内容并归类</p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="flex gap-2 justify-center">
+                        {literature.length === 0 && (
+                          <Button variant="outline" onClick={() => setActiveTab('literature')}>
+                            <Upload className="mr-2 h-4 w-4" /> 先去导入文献
+                          </Button>
+                        )}
+                        <Button onClick={() => setShowNewDimensionDialog(true)}>
+                          <Plus className="mr-2 h-4 w-4" /> 新建分类维度
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* 有维度但无文献的提示 */}
+                  {classificationDimensions.length > 0 && literature.length === 0 && (
+                    <div className="text-center py-8 bg-amber-50 dark:bg-amber-900/20 rounded-lg">
+                      <AlertCircle className="mx-auto h-8 w-8 text-amber-500 mb-2" />
+                      <p className="text-amber-700 dark:text-amber-300 font-medium mb-1">暂无可分类的文献</p>
+                      <p className="text-sm text-amber-600 dark:text-amber-400 mb-3">
+                        请先导入文献后再执行分类
+                      </p>
+                      <Button onClick={() => setActiveTab('literature')}>
+                        <Upload className="mr-2 h-4 w-4" /> 前往导入文献
                       </Button>
                     </div>
                   )}
