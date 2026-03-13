@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { S3Storage } from 'coze-coding-dev-sdk';
-import { parseEndNoteXML, parseRIS, RISRecord } from '@/lib/ris-parser';
+import { parseEndNoteXML, parseRIS } from '@/lib/ris-parser';
 
 const storage = new S3Storage({
   endpointUrl: process.env.COZE_BUCKET_ENDPOINT_URL,
@@ -121,7 +121,7 @@ async function handlePdfPaste(
 }
 
 /**
- * 处理RIS格式粘贴
+ * 处理RIS格式粘贴（批量优化版）
  */
 async function handleRisPaste(
   client: any,
@@ -130,18 +130,23 @@ async function handleRisPaste(
   autoProcess?: boolean
 ) {
   try {
-    // 解析RIS内容
-    const records = parseRisContent(risContent);
+    // 使用增强版RIS解析器
+    const records = parseRIS(risContent);
     
     if (records.length === 0) {
       return NextResponse.json({ error: '未识别到有效的文献记录' }, { status: 400 });
     }
 
-    const importedRecords = [];
-    
-    for (const record of records) {
-      // 构建完整的元数据用于存储
-      const metadata = {
+    console.log(`[Paste Import] RIS: Parsed ${records.length} records`);
+
+    // 批量准备插入数据
+    const insertData = records.map(record => ({
+      title: record.title || 'Untitled',
+      authors: record.authors?.join(', ') || '',
+      year: record.year,
+      doi: record.doi || '',
+      journal: record.journal || '',
+      raw_content: JSON.stringify({
         title: record.title || 'Untitled',
         authors: record.authors?.join(', '),
         year: record.year,
@@ -152,39 +157,27 @@ async function handleRisPaste(
         pages: record.pages,
         abstract: record.abstract,
         keywords: record.keywords,
-      };
-      
-      // 创建文献记录
-      const { data: literature, error } = await client
-        .from('literature')
-        .insert({
-          title: record.title || 'Untitled',
-          authors: record.authors?.join(', '),
-          year: record.year,
-          doi: record.doi,
-          journal: record.journal,
-          // 将完整元数据存储到 raw_content 字段
-          raw_content: JSON.stringify(metadata),
-          status: 'completed', // RIS导入的文献已有元数据，标记为完成
-        })
-        .select()
-        .single();
+      }),
+      status: 'completed' as const,
+    }));
 
-      if (error) {
-        console.error('[Paste Import] RIS database insert error:', error);
-      }
+    // 批量插入数据库
+    const { data: insertedRecords, error: insertError } = await client
+      .from('literature')
+      .insert(insertData)
+      .select();
 
-      if (!error && literature) {
-        importedRecords.push(literature);
-      }
+    if (insertError) {
+      console.error('[Paste Import] RIS batch insert error:', insertError);
+      return NextResponse.json({ error: '数据库插入失败' }, { status: 500 });
     }
 
     return NextResponse.json({
       success: true,
       data: {
         total: records.length,
-        imported: importedRecords.length,
-        records: importedRecords,
+        imported: insertedRecords?.length || 0,
+        records: insertedRecords || [],
       },
     });
   } catch (error) {
@@ -194,7 +187,7 @@ async function handleRisPaste(
 }
 
 /**
- * 处理XML格式粘贴
+ * 处理XML格式粘贴（批量优化版）
  */
 async function handleXmlPaste(
   client: any,
@@ -203,67 +196,54 @@ async function handleXmlPaste(
   autoProcess?: boolean
 ) {
   try {
-    // 解析XML内容
-    const records = parseXmlContent(xmlContent);
+    // 使用增强版XML解析器
+    const records = parseEndNoteXML(xmlContent);
     
     if (records.length === 0) {
       return NextResponse.json({ error: '未识别到有效的文献记录' }, { status: 400 });
     }
 
-    const importedRecords = [];
-    
-    for (const record of records) {
-      console.log('[Paste Import] Inserting record:', {
-        title: record.title,
-        authors: record.authors,
-        year: record.year,
-        doi: record.doi,
-      });
-      
-      // 构建完整的元数据用于存储
-      const metadata = {
+    console.log(`[Paste Import] XML: Parsed ${records.length} records`);
+
+    // 批量准备插入数据
+    const insertData = records.map(record => ({
+      title: record.title || 'Untitled',
+      authors: record.authors?.join(', ') || '',
+      year: record.year,
+      doi: record.doi || '',
+      journal: record.journal || '',
+      raw_content: JSON.stringify({
         title: record.title || 'Untitled',
         authors: record.authors?.join(', '),
         year: record.year,
-        journal: record.journal,
         doi: record.doi,
+        journal: record.journal,
         volume: record.volume,
         issue: record.issue,
         pages: record.pages,
         abstract: record.abstract,
         keywords: record.keywords,
-      };
-      
-      const { data: literature, error } = await client
-        .from('literature')
-        .insert({
-          title: record.title || 'Untitled',
-          authors: record.authors?.join(', '),
-          year: record.year,
-          doi: record.doi,
-          journal: record.journal,
-          // 将完整元数据存储到 raw_content 字段
-          raw_content: JSON.stringify(metadata),
-          status: 'completed',
-        })
-        .select()
-        .single();
+      }),
+      status: 'completed' as const,
+    }));
 
-      if (error) {
-        console.error('[Paste Import] Database insert error:', error);
-      }
+    // 批量插入数据库
+    const { data: insertedRecords, error: insertError } = await client
+      .from('literature')
+      .insert(insertData)
+      .select();
 
-      if (!error && literature) {
-        importedRecords.push(literature);
-      }
+    if (insertError) {
+      console.error('[Paste Import] XML batch insert error:', insertError);
+      return NextResponse.json({ error: '数据库插入失败' }, { status: 500 });
     }
 
     return NextResponse.json({
       success: true,
       data: {
         total: records.length,
-        imported: importedRecords.length,
-        records: importedRecords,
+        imported: insertedRecords?.length || 0,
+        records: insertedRecords || [],
       },
     });
   } catch (error) {
@@ -306,111 +286,4 @@ async function handleAutoDetect(
   return NextResponse.json({ 
     error: '无法识别内容格式，请粘贴PDF文件、RIS格式或EndNote XML格式的文本' 
   }, { status: 400 });
-}
-
-/**
- * 解析RIS格式内容
- */
-function parseRisContent(content: string): Array<Record<string, any>> {
-  const records: Array<Record<string, any>> = [];
-  const lines = content.split(/\r?\n/);
-  
-  let currentRecord: Record<string, any> = {};
-  
-  for (const line of lines) {
-    const trimmed = line.trim();
-    
-    // 检测记录开始
-    if (trimmed.match(/^TY\s*-\s*/i)) {
-      currentRecord = { type: 'JOUR' };
-    }
-    
-    // 检测记录结束
-    if (trimmed.match(/^ER\s*-\s*/i)) {
-      if (currentRecord.title) {
-        records.push(currentRecord);
-      }
-      currentRecord = {};
-      continue;
-    }
-
-    // 解析字段
-    const match = trimmed.match(/^([A-Z0-9]{2})\s*-\s*(.*)$/i);
-    if (match && currentRecord.type) {
-      const [, tag, value] = match;
-      
-      switch (tag.toUpperCase()) {
-        case 'TI':
-        case 'T1':
-          currentRecord.title = value;
-          break;
-        case 'AU':
-        case 'A1':
-          if (!currentRecord.authors) currentRecord.authors = [];
-          currentRecord.authors.push(value);
-          break;
-        case 'PY':
-        case 'Y1':
-          const yearMatch = value.match(/\d{4}/);
-          if (yearMatch) currentRecord.year = parseInt(yearMatch[0]);
-          break;
-        case 'DO':
-          currentRecord.doi = value;
-          break;
-        case 'JO':
-        case 'JF':
-        case 'T2':
-          currentRecord.journal = value;
-          break;
-        case 'VL':
-          currentRecord.volume = value;
-          break;
-        case 'IS':
-          currentRecord.issue = value;
-          break;
-        case 'SP':
-        case 'EP':
-          if (!currentRecord.pages) {
-            currentRecord.pages = value;
-          } else {
-            currentRecord.pages += '-' + value;
-          }
-          break;
-        case 'AB':
-        case 'N2':
-          currentRecord.abstract = value;
-          break;
-        case 'KW':
-          if (!currentRecord.keywords) currentRecord.keywords = [];
-          currentRecord.keywords.push(value);
-          break;
-      }
-    }
-  }
-
-  return records;
-}
-
-/**
- * 解析EndNote XML格式内容（使用增强版解析器）
- */
-function parseXmlContent(content: string): Array<Record<string, any>> {
-  // 使用增强后的XML解析器
-  const risRecords = parseEndNoteXML(content);
-  
-  // 转换为通用格式
-  return risRecords.map(record => ({
-    title: record.title,
-    authors: record.authors,
-    year: record.year,
-    doi: record.doi,
-    journal: record.journal,
-    volume: record.volume,
-    issue: record.issue,
-    pages: record.pages,
-    abstract: record.abstract,
-    keywords: record.keywords,
-    issn: record.issn,
-    publisher: record.publisher,
-  }));
 }

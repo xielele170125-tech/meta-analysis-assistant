@@ -462,9 +462,15 @@ async function downloadAndUploadPDF(pdfUrl: string, doi: string): Promise<{ key:
 }
 
 /**
- * 批量导入文献
+ * 批量导入文献（优化版）
+ * 优化策略：
+ * 1. 默认不自动下载PDF，快速导入元数据
+ * 2. 批量数据库插入，减少IO次数
+ * 3. 如需下载PDF，异步后台处理，不阻塞导入
  */
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
+  
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File;
@@ -492,7 +498,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(`[Import] Parsed ${records.length} records`);
+    console.log(`[Import] Parsed ${records.length} records in ${Date.now() - startTime}ms`);
 
     if (records.length === 0) {
       return NextResponse.json({ 
@@ -501,120 +507,80 @@ export async function POST(request: NextRequest) {
     }
 
     const client = getSupabaseClient();
+    
+    // 批量准备插入数据
+    const insertData = records.map(record => ({
+      title: record.title || '未命名文献',
+      authors: record.authors.join('; '),
+      year: record.year,
+      journal: record.journal,
+      doi: record.doi,
+      raw_content: JSON.stringify({
+        title: record.title || '未命名文献',
+        authors: record.authors,
+        year: record.year,
+        journal: record.journal,
+        doi: record.doi,
+        volume: record.volume,
+        issue: record.issue,
+        pages: record.pages,
+        abstract: record.abstract,
+        keywords: record.keywords,
+      }),
+      status: 'pending' as const,
+    }));
+
+    // 批量插入数据库（一次性插入所有记录）
+    console.log(`[Import] Batch inserting ${insertData.length} records...`);
+    const insertStartTime = Date.now();
+    
+    const { data: insertedRecords, error: insertError } = await client
+      .from('literature')
+      .insert(insertData)
+      .select();
+
+    if (insertError) {
+      console.error('[Import] Batch insert error:', insertError);
+      return NextResponse.json({ error: '数据库插入失败: ' + insertError.message }, { status: 500 });
+    }
+
+    console.log(`[Import] Batch insert completed in ${Date.now() - insertStartTime}ms`);
+
+    // 构建返回结果
     const result: ImportResult = {
       total: records.length,
-      imported: 0,
+      imported: insertedRecords?.length || 0,
       withPdf: 0,
-      withoutPdf: 0,
+      withoutPdf: records.length,
       failed: 0,
-      records: [],
+      records: (insertedRecords || []).map((lit: any, index: number) => {
+        const record = records[index];
+        const pdfSearchLinks = generatePDFSearchLinks(record.title || '', record.doi || null);
+        return {
+          title: lit.title,
+          doi: lit.doi || null,
+          status: 'no_pdf' as const,
+          message: '已导入，可手动上传 PDF',
+          literatureId: lit.id,
+          pdfSearchLinks,
+        };
+      }),
     };
 
-    // 处理每条记录
-    for (const record of records) {
-      try {
-        let fileKey: string | null = null;
-        let fileUrl: string | null = null;
-        let pdfDownloaded = false;
-        let pdfMessage = '';
-
-        // 尝试通过 DOI 获取 PDF
-        if (autoDownloadPdf && record.doi) {
-          const pdfResult = await getPDFByDOI(record.doi);
-          if (pdfResult) {
-            console.log(`[Import] Found PDF for "${record.title}" via ${pdfResult.source}`);
-            const uploadResult = await downloadAndUploadPDF(pdfResult.url, record.doi);
-            if (uploadResult) {
-              fileKey = uploadResult.key;
-              fileUrl = uploadResult.url;
-              pdfDownloaded = true;
-              result.withPdf++;
-              pdfMessage = `已自动下载 PDF (来源: ${pdfResult.source})`;
-            } else {
-              pdfMessage = '找到 PDF 链接但下载失败，请手动下载';
-              console.log(`[Import] PDF download failed for ${record.doi}`);
-            }
-          } else {
-            pdfMessage = '该文献无开放获取 PDF，请手动获取';
-          }
-        } else if (!record.doi) {
-          pdfMessage = '无 DOI 信息，无法自动下载，请手动获取';
-        } else if (!autoDownloadPdf) {
-          pdfMessage = '已导入，可手动上传 PDF';
-        }
-
-        // 生成 PDF 搜索链接（当无法自动下载时）
-        const pdfSearchLinks = !pdfDownloaded ? generatePDFSearchLinks(record.title || '', record.doi || null) : undefined;
-
-        // 构建完整的元数据用于存储
-        const metadata = {
-          title: record.title || '未命名文献',
-          authors: record.authors,
-          year: record.year,
-          journal: record.journal,
-          doi: record.doi,
-          volume: record.volume,
-          issue: record.issue,
-          pages: record.pages,
-          abstract: record.abstract,
-          keywords: record.keywords,
-        };
-
-        // 创建文献记录
-        const { data: literature, error } = await client
-          .from('literature')
-          .insert({
-            title: record.title || '未命名文献',
-            authors: record.authors.join('; '),
-            year: record.year,
-            journal: record.journal,
-            doi: record.doi,
-            file_key: fileKey,
-            file_name: fileKey ? `${record.doi || record.title}.pdf` : null,
-            // 将完整元数据存储到 raw_content 字段
-            raw_content: JSON.stringify(metadata),
-            status: pdfDownloaded ? 'pending' : 'pending',
-          })
-          .select()
-          .single();
-
-        if (error) {
-          result.failed++;
-          result.records.push({
-            title: record.title || '未命名文献',
-            doi: record.doi || null,
-            status: 'failed',
-            message: error.message,
-            pdfSearchLinks,
-          });
-          continue;
-        }
-
-        if (!pdfDownloaded) {
-          result.withoutPdf++;
-        }
-
-        result.imported++;
-        result.records.push({
-          title: record.title || '未命名文献',
-          doi: record.doi || null,
-          status: pdfDownloaded ? 'imported' : 'no_pdf',
-          message: pdfDownloaded 
-            ? pdfMessage || '已导入并下载 PDF'
-            : pdfMessage || '已导入，点击搜索链接获取 PDF',
-          literatureId: literature.id,
-          pdfSearchLinks,
-        });
-      } catch (recordError) {
-        result.failed++;
-        result.records.push({
-          title: record.title || '未命名文献',
-          doi: record.doi || null,
-          status: 'failed',
-          message: recordError instanceof Error ? recordError.message : '处理失败',
-        });
-      }
+    // 如果需要自动下载PDF，异步处理（不阻塞响应）
+    if (autoDownloadPdf && insertedRecords && insertedRecords.length > 0) {
+      // 异步下载PDF，不等待结果
+      downloadPdfsAsync(insertedRecords, records).catch(err => 
+        console.error('[Import] Async PDF download error:', err)
+      );
+      
+      result.records = result.records.map(r => ({
+        ...r,
+        message: '已导入，PDF正在后台下载中...',
+      }));
     }
+
+    console.log(`[Import] Total import time: ${Date.now() - startTime}ms`);
 
     return NextResponse.json({
       success: true,
@@ -627,4 +593,64 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+/**
+ * 异步批量下载PDF（后台任务）
+ */
+async function downloadPdfsAsync(
+  insertedRecords: any[], 
+  originalRecords: RISRecord[]
+): Promise<void> {
+  console.log(`[PDF Async] Starting background PDF download for ${insertedRecords.length} records`);
+  
+  const client = getSupabaseClient();
+  let downloadedCount = 0;
+  
+  // 并发限制：同时处理3个下载任务
+  const concurrencyLimit = 3;
+  const chunks: any[][] = [];
+  
+  for (let i = 0; i < insertedRecords.length; i += concurrencyLimit) {
+    chunks.push(insertedRecords.slice(i, i + concurrencyLimit));
+  }
+  
+  for (const chunk of chunks) {
+    await Promise.all(chunk.map(async (lit, chunkIndex) => {
+      const index = insertedRecords.indexOf(lit);
+      const record = originalRecords[index];
+      
+      if (!record.doi) {
+        console.log(`[PDF Async] No DOI for "${lit.title}", skipping`);
+        return;
+      }
+      
+      try {
+        const pdfResult = await getPDFByDOI(record.doi);
+        
+        if (pdfResult) {
+          console.log(`[PDF Async] Found PDF for "${lit.title}" via ${pdfResult.source}`);
+          const uploadResult = await downloadAndUploadPDF(pdfResult.url, record.doi);
+          
+          if (uploadResult) {
+            // 更新数据库记录
+            await client
+              .from('literature')
+              .update({
+                file_key: uploadResult.key,
+                file_name: `${record.doi}.pdf`,
+              })
+              .eq('id', lit.id);
+            
+            downloadedCount++;
+            console.log(`[PDF Async] Successfully downloaded PDF for "${lit.title}"`);
+          }
+        }
+      } catch (err) {
+        console.error(`[PDF Async] Error processing "${lit.title}":`, err);
+      }
+    }));
+  }
+  
+  console.log(`[PDF Async] Completed. Downloaded ${downloadedCount}/${insertedRecords.length} PDFs`);
 }
