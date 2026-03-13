@@ -203,6 +203,54 @@ export const qualityAssessment = pgTable(
   ]
 );
 
+// 分类维度表
+export const classificationDimensions = pgTable(
+  "classification_dimensions",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    name: varchar("name", { length: 255 }).notNull(),
+    description: text("description"),
+    // 分类类别 (JSON数组)
+    categories: jsonb("categories").notNull().$type<string[]>(),
+    // AI推荐来源
+    isAiRecommended: boolean("is_ai_recommended").default(false),
+    // 研究问题（用于AI推荐）
+    researchQuestion: text("research_question"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
+  }
+);
+
+// 文献分类结果表
+export const literatureClassifications = pgTable(
+  "literature_classifications",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    literatureId: varchar("literature_id", { length: 36 }).notNull(),
+    dimensionId: varchar("dimension_id", { length: 36 }).notNull(),
+    // 分类结果
+    category: varchar("category", { length: 255 }).notNull(),
+    // AI置信度
+    confidence: real("confidence"),
+    // 分类依据
+    evidence: text("evidence"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("classification_literature_idx").on(table.literatureId),
+    index("classification_dimension_idx").on(table.dimensionId),
+  ]
+);
+
 // TypeScript types
 export type Literature = typeof literature.$inferSelect;
 export type ExtractedData = typeof extractedData.$inferSelect;
@@ -210,3 +258,5 @@ export type MetaAnalysis = typeof metaAnalysis.$inferSelect;
 export type AnalysisResult = typeof analysisResult.$inferSelect;
 export type AnalysisDataRelation = typeof analysisDataRelation.$inferSelect;
 export type QualityAssessment = typeof qualityAssessment.$inferSelect;
+export type ClassificationDimension = typeof classificationDimensions.$inferSelect;
+export type LiteratureClassification = typeof literatureClassifications.$inferSelect;

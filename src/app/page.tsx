@@ -622,13 +622,16 @@ export default function Home() {
       const data = await res.json();
 
       if (data.success) {
+        const importedCount = data.data.imported || 1;
         setPasteResult({
           total: data.data.total || 1,
-          imported: data.data.imported || 1,
-          message: data.data.message || `成功导入 ${data.data.imported || 1} 篇文献`,
+          imported: importedCount,
+          message: `成功导入 ${importedCount} 篇文献`,
         });
         // 刷新文献列表
         loadLiterature();
+        // 刷新分类维度列表
+        loadClassificationDimensions();
       } else {
         alert('导入失败: ' + data.error);
       }
@@ -873,6 +876,9 @@ export default function Home() {
         }
         await loadExtractedData();
       }
+      
+      // 刷新分类维度列表
+      loadClassificationDimensions();
     } catch (error) {
       console.error('Import error:', error);
       alert(error instanceof Error ? error.message : '导入失败');
@@ -2762,6 +2768,27 @@ export default function Home() {
                   </TableBody>
                 </Table>
               </ScrollArea>
+              
+              {/* 引导用户去分类 */}
+              {importResult.imported > 0 && (
+                <div className="mt-4 pt-4 border-t">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium">下一步：文献智能分类</p>
+                      <p className="text-xs text-slate-500">创建分类维度，对文献进行亚组分析或敏感性分析</p>
+                    </div>
+                    <Button 
+                      onClick={() => {
+                        setShowImportResult(false);
+                        setActiveTab('classify');
+                      }}
+                    >
+                      <Layers className="mr-2 h-4 w-4" />
+                      前往文献分类
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </DialogContent>
@@ -2888,6 +2915,24 @@ export default function Home() {
                     共处理 {pasteResult.total} 条记录，成功导入 {pasteResult.imported} 条
                   </p>
                 )}
+                {/* 引导用户去分类 */}
+                <div className="mt-3 pt-3 border-t border-green-200 dark:border-green-800">
+                  <p className="text-sm text-green-700 dark:text-green-300 mb-2">
+                    下一步：创建分类维度，对文献进行智能分组
+                  </p>
+                  <Button 
+                    size="sm"
+                    onClick={() => {
+                      setShowPasteDialog(false);
+                      setPasteContent('');
+                      setPasteResult(null);
+                      setActiveTab('classify');
+                    }}
+                  >
+                    <Layers className="mr-2 h-4 w-4" />
+                    前往文献分类
+                  </Button>
+                </div>
               </div>
             )}
           </div>
