@@ -514,23 +514,30 @@ export async function GET(request: NextRequest) {
     const scaleType = searchParams.get('scaleType');
 
     if (!literatureId) {
-      // 获取所有评估结果，关联文献信息
-      const { data, error } = await client
+      // 获取所有评估结果
+      const { data: assessments, error: assessError } = await client
         .from('quality_assessment')
-        .select(`
-          *,
-          literature:literature_id (
-            id,
-            title,
-            authors,
-            year
-          )
-        `)
+        .select('*')
         .order('created_at', { ascending: false });
 
-      if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+      if (assessError) {
+        console.error('[Quality] Query error:', assessError);
+        return NextResponse.json({ error: assessError.message }, { status: 500 });
       }
+
+      // 手动关联文献信息
+      const literatureIds = [...new Set((assessments || []).map(a => a.literature_id))];
+      const { data: literatureData } = await client
+        .from('literature')
+        .select('id, title, authors, year')
+        .in('id', literatureIds);
+
+      const literatureMap = new Map((literatureData || []).map(l => [l.id, l]));
+      
+      const data = (assessments || []).map(a => ({
+        ...a,
+        literature: literatureMap.get(a.literature_id) || null,
+      }));
 
       return NextResponse.json({ success: true, data });
     }

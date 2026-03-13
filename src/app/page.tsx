@@ -32,7 +32,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet, Code2, TriangleAlert, TrendingUp, Search, GitCompare, Info, RefreshCw, ClipboardCheck, Star, AlertTriangle, CheckCircle2, Layers, FolderTree, Plus, X, Lightbulb, Sparkles, Clipboard, FileDigit } from 'lucide-react';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet, Code2, TriangleAlert, TrendingUp, Search, GitCompare, Info, RefreshCw, ClipboardCheck, Star, AlertTriangle, CheckCircle2, Layers, FolderTree, Plus, X, Lightbulb, Sparkles, Clipboard, FileDigit, ChevronDown } from 'lucide-react';
 import QualityAssessmentTable from '@/components/QualityAssessmentTable';
 
 // 类型定义
@@ -2067,110 +2068,236 @@ export default function Home() {
                     );
                   })()}
 
-                  {/* 分类结果 */}
-                  {classificationResults.length > 0 && (
-                    <div className="border rounded-lg">
-                      <div className="p-4 border-b bg-slate-50 flex items-center justify-between">
-                        <h3 className="font-medium">分类结果 ({classificationResults.length} 篇)</h3>
-                        <div className="flex gap-2">
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={exportByCategory}
-                          >
-                            <Download className="h-4 w-4 mr-1" />
-                            按分类导出
-                          </Button>
-                          <Button 
-                            variant="default" 
-                            size="sm"
-                            onClick={async () => {
-                              if (!selectedDimension) return;
-                              const dimension = classificationDimensions.find(d => d.id === selectedDimension);
-                              const count = classificationResults.length;
-                              
-                              if (!confirm(`确定导出全部 ${count} 篇已分类文献？`)) {
-                                return;
-                              }
-                              
-                              // 导出当前维度所有分类的文献
-                              const ids = classificationResults.map(r => r.literature_id).join(',');
-                              const res = await fetch(`/api/literature/export?format=ris&ids=${ids}`);
-                              if (res.ok) {
-                                const blob = await res.blob();
-                                const url = window.URL.createObjectURL(blob);
-                                const a = document.createElement('a');
-                                a.href = url;
-                                a.download = `${dimension?.name || 'classification'}_全部(${count}篇).ris`;
-                                a.click();
-                                window.URL.revokeObjectURL(url);
-                              }
-                            }}
-                          >
-                            <FileText className="h-4 w-4 mr-1" />
-                            导出全部 ({classificationResults.length} 篇)
-                          </Button>
+                  {/* 分类结果 - 按分类分组展示 */}
+                  {classificationResults.length > 0 && (() => {
+                    const dimension = classificationDimensions.find(d => d.id === selectedDimension);
+                    // 按分类分组
+                    const groupedResults = classificationResults.reduce((acc, result) => {
+                      const cat = result.category || '未分类';
+                      if (!acc[cat]) acc[cat] = [];
+                      acc[cat].push(result);
+                      return acc;
+                    }, {} as Record<string, typeof classificationResults>);
+                    
+                    const categories = Object.keys(groupedResults);
+                    const validCategories = categories.filter(cat => groupedResults[cat].length >= 2);
+                    const invalidCategories = categories.filter(cat => groupedResults[cat].length < 2);
+                    
+                    return (
+                    <div className="space-y-4">
+                      {/* 统计概览 */}
+                      <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h4 className="font-medium">分类统计</h4>
+                            <p className="text-sm text-slate-600 mt-1">
+                              共 <strong>{classificationResults.length}</strong> 篇文献，分为 <strong>{categories.length}</strong> 个类别
+                            </p>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={exportByCategory}
+                            >
+                              <Download className="h-4 w-4 mr-1" />
+                              批量导出
+                            </Button>
+                            <Button 
+                              variant="default" 
+                              size="sm"
+                              onClick={async () => {
+                                const count = classificationResults.length;
+                                if (!confirm(`确定导出全部 ${count} 篇已分类文献？`)) return;
+                                const ids = classificationResults.map(r => r.literature_id).join(',');
+                                const res = await fetch(`/api/literature/export?format=ris&ids=${ids}`);
+                                if (res.ok) {
+                                  const blob = await res.blob();
+                                  const url = window.URL.createObjectURL(blob);
+                                  const a = document.createElement('a');
+                                  a.href = url;
+                                  a.download = `${dimension?.name || 'classification'}_全部(${count}篇).ris`;
+                                  a.click();
+                                  window.URL.revokeObjectURL(url);
+                                }
+                              }}
+                            >
+                              <FileText className="h-4 w-4 mr-1" />
+                              导出全部 ({classificationResults.length} 篇)
+                            </Button>
+                          </div>
                         </div>
+                        
+                        {/* 可用于Meta分析的提示 */}
+                        {validCategories.length >= 2 ? (
+                          <div className="mt-3 p-2 bg-green-100 dark:bg-green-900/30 rounded text-sm text-green-700 dark:text-green-300">
+                            ✓ 有 {validCategories.length} 个类别可用于 Meta 分析（每类≥2篇）
+                          </div>
+                        ) : (
+                          <div className="mt-3 p-2 bg-amber-100 dark:bg-amber-900/30 rounded text-sm text-amber-700 dark:text-amber-300">
+                            ⚠ 仅有 {validCategories.length} 个类别可用于 Meta 分析。建议每个类别至少有 2 篇文献才能进行比较分析。
+                          </div>
+                        )}
                       </div>
-                      <ScrollArea className="h-[400px]">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>文献</TableHead>
-                              <TableHead>分类</TableHead>
-                              <TableHead>置信度</TableHead>
-                              <TableHead>证据</TableHead>
-                              <TableHead>操作</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {classificationResults.map((result) => (
-                              <TableRow key={result.id}>
-                                <TableCell>
-                                  <div>
-                                    <div className="font-medium text-sm">{result.literature?.title}</div>
-                                    {result.literature?.authors && (
-                                      <div className="text-xs text-slate-500">
-                                        {result.literature.authors} ({result.literature.year || '未知年份'})
-                                      </div>
-                                    )}
+                      
+                      {/* 有效分类（≥2篇） */}
+                      {validCategories.length > 0 && (
+                        <div>
+                          <h4 className="text-sm font-medium text-green-700 dark:text-green-300 mb-2">
+                            ✓ 可用于 Meta 分析的类别 ({validCategories.length}个)
+                          </h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                            {validCategories.map(cat => (
+                              <Card key={cat} className="border-green-200 dark:border-green-800">
+                                <CardHeader className="p-3 pb-2">
+                                  <div className="flex items-center justify-between">
+                                    <CardTitle className="text-sm">{cat}</CardTitle>
+                                    <Badge variant="default" className="bg-green-500">
+                                      {groupedResults[cat].length} 篇
+                                    </Badge>
                                   </div>
-                                </TableCell>
-                                <TableCell>
-                                  <Badge variant="secondary">{result.category}</Badge>
-                                </TableCell>
-                                <TableCell>
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-16 h-2 bg-slate-200 rounded-full overflow-hidden">
-                                      <div 
-                                        className={`h-full ${result.confidence >= 0.8 ? 'bg-green-500' : result.confidence >= 0.5 ? 'bg-yellow-500' : 'bg-red-500'}`}
-                                        style={{ width: `${result.confidence * 100}%` }}
-                                      />
+                                </CardHeader>
+                                <CardContent className="p-3 pt-0">
+                                  <ScrollArea className="h-32 mb-2">
+                                    <div className="space-y-1">
+                                      {groupedResults[cat].slice(0, 5).map(r => (
+                                        <div key={r.id} className="text-xs text-slate-600 truncate" title={r.literature?.title}>
+                                          • {r.literature?.title}
+                                        </div>
+                                      ))}
+                                      {groupedResults[cat].length > 5 && (
+                                        <div className="text-xs text-slate-400">
+                                          ...还有 {groupedResults[cat].length - 5} 篇
+                                        </div>
+                                      )}
                                     </div>
-                                    <span className="text-xs">{(result.confidence * 100).toFixed(0)}%</span>
-                                  </div>
-                                </TableCell>
-                                <TableCell>
-                                  <p className="text-xs text-slate-600 max-w-xs truncate" title={result.evidence}>
-                                    {result.evidence || '-'}
-                                  </p>
-                                </TableCell>
-                                <TableCell>
+                                  </ScrollArea>
                                   <Button 
-                                    variant="ghost" 
-                                    size="sm"
-                                    onClick={() => exportSingleLiterature(result.literature_id)}
+                                    size="sm" 
+                                    className="w-full"
+                                    onClick={async () => {
+                                      const ids = groupedResults[cat].map(r => r.literature_id).join(',');
+                                      const res = await fetch(`/api/literature/export?format=ris&ids=${ids}`);
+                                      if (res.ok) {
+                                        const blob = await res.blob();
+                                        const url = window.URL.createObjectURL(blob);
+                                        const a = document.createElement('a');
+                                        a.href = url;
+                                        a.download = `${dimension?.name || 'classification'}_${cat}(${groupedResults[cat].length}篇).ris`;
+                                        a.click();
+                                        window.URL.revokeObjectURL(url);
+                                      }
+                                    }}
                                   >
-                                    <Download className="h-4 w-4" />
+                                    <Download className="h-3 w-3 mr-1" />
+                                    下载此类 ({groupedResults[cat].length}篇)
                                   </Button>
-                                </TableCell>
-                              </TableRow>
+                                </CardContent>
+                              </Card>
                             ))}
-                          </TableBody>
-                        </Table>
-                      </ScrollArea>
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* 无效分类（<2篇） */}
+                      {invalidCategories.length > 0 && (
+                        <div>
+                          <h4 className="text-sm font-medium text-amber-700 dark:text-amber-300 mb-2">
+                            ⚠ 文献不足的类别 ({invalidCategories.length}个，需≥2篇才能用于Meta分析)
+                          </h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
+                            {invalidCategories.map(cat => (
+                              <Card key={cat} className="border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-900/10">
+                                <CardContent className="p-3">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-sm">{cat}</span>
+                                    <Badge variant="outline" className="text-amber-600 border-amber-300">
+                                      {groupedResults[cat].length} 篇
+                                    </Badge>
+                                  </div>
+                                  <div className="text-xs text-slate-500 mt-1 truncate">
+                                    {groupedResults[cat][0]?.literature?.title}
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* 详细列表（可折叠） */}
+                      <Collapsible>
+                        <CollapsibleTrigger className="w-full">
+                          <div className="flex items-center justify-center gap-2 p-2 text-sm text-slate-500 hover:text-slate-700 border rounded-lg">
+                            <ChevronDown className="h-4 w-4" />
+                            查看详细分类列表
+                          </div>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                          <div className="border rounded-lg mt-2">
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>文献</TableHead>
+                                  <TableHead>分类</TableHead>
+                                  <TableHead>置信度</TableHead>
+                                  <TableHead>证据</TableHead>
+                                  <TableHead>操作</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {classificationResults.map((result) => (
+                                  <TableRow key={result.id}>
+                                    <TableCell>
+                                      <div>
+                                        <div className="font-medium text-sm">{result.literature?.title}</div>
+                                        {result.literature?.authors && (
+                                          <div className="text-xs text-slate-500">
+                                            {result.literature.authors} ({result.literature.year || '未知年份'})
+                                          </div>
+                                        )}
+                                      </div>
+                                    </TableCell>
+                                    <TableCell>
+                                      <Badge variant={groupedResults[result.category]?.length >= 2 ? "default" : "secondary"}>
+                                        {result.category}
+                                      </Badge>
+                                    </TableCell>
+                                    <TableCell>
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-16 h-2 bg-slate-200 rounded-full overflow-hidden">
+                                          <div 
+                                            className={`h-full ${result.confidence >= 0.8 ? 'bg-green-500' : result.confidence >= 0.5 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                                            style={{ width: `${result.confidence * 100}%` }}
+                                          />
+                                        </div>
+                                        <span className="text-xs">{(result.confidence * 100).toFixed(0)}%</span>
+                                      </div>
+                                    </TableCell>
+                                    <TableCell>
+                                      <p className="text-xs text-slate-600 max-w-xs truncate" title={result.evidence}>
+                                        {result.evidence || '-'}
+                                      </p>
+                                    </TableCell>
+                                    <TableCell>
+                                      <Button 
+                                        variant="ghost" 
+                                        size="sm"
+                                        onClick={() => exportSingleLiterature(result.literature_id)}
+                                      >
+                                        <Download className="h-4 w-4" />
+                                      </Button>
+                                    </TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          </div>
+                        </CollapsibleContent>
+                      </Collapsible>
                     </div>
-                  )}
+                    );
+                  })()}
 
                   {/* 空状态 - 无分类维度 */}
                   {classificationDimensions.length === 0 && (
