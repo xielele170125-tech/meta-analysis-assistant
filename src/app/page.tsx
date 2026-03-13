@@ -243,6 +243,8 @@ export default function Home() {
     name: string;
     description?: string;
     categories: string[];
+    totalClassified?: number;
+    categoryCounts?: Record<string, number>;
   }>>([]);
   const [selectedDimension, setSelectedDimension] = useState<string | null>(null);
   const [classificationResults, setClassificationResults] = useState<Array<{
@@ -366,10 +368,11 @@ export default function Home() {
   }, []);
 
   // 加载质量评分数据
-  // 加载分类维度
+  // 加载分类维度（带统计数据）
   const loadClassificationDimensions = useCallback(async () => {
     try {
-      const res = await fetch('/api/literature/classify?action=dimensions');
+      // 使用 stats API 获取带统计的分类维度
+      const res = await fetch('/api/literature/classify?action=stats');
       const data = await res.json();
       if (data.success) setClassificationDimensions(data.data);
     } catch (error) {
@@ -489,15 +492,32 @@ export default function Home() {
     const dimension = classificationDimensions.find(d => d.id === selectedDimension);
     if (!dimension) return;
 
+    // 统计每个分类的文献数量
+    const categoryStats = (dimension.categories as string[]).map(cat => ({
+      name: cat,
+      count: dimension.categoryCounts?.[cat] || 0
+    })).filter(s => s.count > 0);
+
+    if (categoryStats.length === 0) {
+      alert('没有可导出的分类结果，请先执行AI分类');
+      return;
+    }
+
+    // 显示确认对话框
+    const statsText = categoryStats.map(s => `• ${s.name}: ${s.count} 篇`).join('\n');
+    if (!confirm(`将导出以下分类的文献：\n\n${statsText}\n\n共 ${dimension.totalClassified || 0} 篇文献，是否继续？`)) {
+      return;
+    }
+
     // 按每个分类导出
-    for (const category of dimension.categories as string[]) {
+    for (const { name: category, count } of categoryStats) {
       const res = await fetch(`/api/literature/export?format=ris&dimensionId=${selectedDimension}&category=${encodeURIComponent(category)}`);
       if (res.ok) {
         const blob = await res.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${dimension.name}_${category}.ris`;
+        a.download = `${dimension.name}_${category}(${count}篇).ris`;
         a.click();
         window.URL.revokeObjectURL(url);
       }
@@ -1958,24 +1978,40 @@ export default function Home() {
                         <CardContent className="p-4">
                           <div className="flex items-center justify-between mb-2">
                             <h3 className="font-medium">{dim.name}</h3>
-                            <Button 
-                              variant="ghost" 
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                deleteDimension(dim.id);
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4 text-slate-400 hover:text-red-500" />
-                            </Button>
+                            <div className="flex items-center gap-2">
+                              {dim.totalClassified && dim.totalClassified > 0 && (
+                                <Badge variant="outline" className="text-xs">
+                                  {dim.totalClassified} 篇
+                                </Badge>
+                              )}
+                              <Button 
+                                variant="ghost" 
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  deleteDimension(dim.id);
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4 text-slate-400 hover:text-red-500" />
+                              </Button>
+                            </div>
                           </div>
                           {dim.description && (
                             <p className="text-sm text-slate-500 mb-2">{dim.description}</p>
                           )}
                           <div className="flex flex-wrap gap-1">
-                            {(dim.categories as string[]).map((cat, idx) => (
-                              <Badge key={idx} variant="secondary" className="text-xs">{cat}</Badge>
-                            ))}
+                            {(dim.categories as string[]).map((cat, idx) => {
+                              const count = dim.categoryCounts?.[cat] || 0;
+                              return (
+                                <Badge 
+                                  key={idx} 
+                                  variant={count > 0 ? "default" : "secondary"} 
+                                  className="text-xs"
+                                >
+                                  {cat} {count > 0 && `(${count})`}
+                                </Badge>
+                              );
+                            })}
                           </div>
                         </CardContent>
                       </Card>
@@ -1983,10 +2019,20 @@ export default function Home() {
                   </div>
 
                   {/* 分类操作区 */}
-                  {selectedDimension && (
+                  {selectedDimension && (() => {
+                    const dimension = classificationDimensions.find(d => d.id === selectedDimension);
+                    const totalCount = dimension?.totalClassified || 0;
+                    return (
                     <div className="border rounded-lg p-4 space-y-4">
                       <div className="flex items-center justify-between">
-                        <h3 className="font-medium">执行AI分类</h3>
+                        <h3 className="font-medium">
+                          执行AI分类
+                          {totalCount > 0 && (
+                            <span className="ml-2 text-sm font-normal text-slate-500">
+                              (已分类 {totalCount} 篇)
+                            </span>
+                          )}
+                        </h3>
                         <div className="flex gap-2">
                           <Button 
                             onClick={classifyLiterature} 
@@ -2004,9 +2050,13 @@ export default function Home() {
                               </>
                             )}
                           </Button>
-                          <Button variant="outline" onClick={exportByCategory}>
+                          <Button 
+                            variant="outline" 
+                            onClick={exportByCategory}
+                            disabled={totalCount === 0}
+                          >
                             <Download className="mr-2 h-4 w-4" />
-                            按分类导出
+                            按分类导出 {totalCount > 0 && `(${totalCount}篇)`}
                           </Button>
                         </div>
                       </div>
@@ -2014,7 +2064,8 @@ export default function Home() {
                         <p className="text-sm text-amber-600">请先在设置中配置 DeepSeek API Key</p>
                       )}
                     </div>
-                  )}
+                    );
+                  })()}
 
                   {/* 分类结果 */}
                   {classificationResults.length > 0 && (
@@ -2035,6 +2086,13 @@ export default function Home() {
                             size="sm"
                             onClick={async () => {
                               if (!selectedDimension) return;
+                              const dimension = classificationDimensions.find(d => d.id === selectedDimension);
+                              const count = classificationResults.length;
+                              
+                              if (!confirm(`确定导出全部 ${count} 篇已分类文献？`)) {
+                                return;
+                              }
+                              
                               // 导出当前维度所有分类的文献
                               const ids = classificationResults.map(r => r.literature_id).join(',');
                               const res = await fetch(`/api/literature/export?format=ris&ids=${ids}`);
@@ -2043,15 +2101,14 @@ export default function Home() {
                                 const url = window.URL.createObjectURL(blob);
                                 const a = document.createElement('a');
                                 a.href = url;
-                                const dimension = classificationDimensions.find(d => d.id === selectedDimension);
-                                a.download = `${dimension?.name || 'classification'}_all.ris`;
+                                a.download = `${dimension?.name || 'classification'}_全部(${count}篇).ris`;
                                 a.click();
                                 window.URL.revokeObjectURL(url);
                               }
                             }}
                           >
                             <FileText className="h-4 w-4 mr-1" />
-                            导出全部 RIS
+                            导出全部 ({classificationResults.length} 篇)
                           </Button>
                         </div>
                       </div>
