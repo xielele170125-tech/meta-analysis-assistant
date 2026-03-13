@@ -219,8 +219,8 @@ export async function POST(request: NextRequest) {
       }).filter(lit => lit.title);
 
       // 优化：并行处理多个批次
-      const BATCH_SIZE = 15; // 每批处理的文献数
-      const MAX_CONCURRENT = 3; // 最大并发批次数
+      const BATCH_SIZE = 10; // 每批处理的文献数（减小批次大小提高速度）
+      const MAX_CONCURRENT = 5; // 最大并发批次数（增加并发数）
       
       const batches: Array<typeof literatureData> = [];
       for (let i = 0; i < literatureData.length; i += BATCH_SIZE) {
@@ -414,13 +414,11 @@ async function batchClassifyLiterature(
   confidence: number;
   evidence: string;
 }>> {
-  // 构建文献列表文本 - 使用索引号作为标识
+  // 构建文献列表文本 - 使用索引号作为标识，减少token消耗
   const literatureText = literatureBatch.map((lit, idx) => {
-    const contentPreview = lit.content.substring(0, 500);
-    return `[文献${idx + 1}]
-标题: ${lit.title}
-年份: ${lit.year || '未知'}
-摘要: ${contentPreview}`;
+    // 缩短内容预览，减少token
+    const contentPreview = lit.content.substring(0, 300);
+    return `[${idx + 1}] ${lit.title}${lit.year ? ` (${lit.year})` : ''}\n${contentPreview}`;
   }).join('\n\n');
 
   const systemPrompt = `你是医学文献分类专家。根据维度对文献分类。
@@ -434,17 +432,8 @@ ${dimension.description ? `说明: ${dimension.description}` : ''}
 2. confidence表示分类置信度(0.0-1.0)，0.7以上表示确定，0.5-0.7表示可能，0.5以下表示不确定
 3. evidence是从文献中提取的判断依据
 
-返回JSON格式:
-{
-  "results": [
-    {
-      "index": 1,
-      "category": "选择的分类",
-      "confidence": 0.8,
-      "evidence": "判断依据"
-    }
-  ]
-}`;
+【重要】只返回纯JSON，不要使用markdown代码块，不要任何其他文字。返回格式:
+{"results":[{"index":1,"category":"选择的分类","confidence":0.8,"evidence":"判断依据"}]}`;
 
   const userPrompt = `请对以下 ${literatureBatch.length} 篇文献进行分类：
 
@@ -467,7 +456,14 @@ ${literatureText}
     console.log(`[BatchClassify] LLM call completed in ${Date.now() - startTime}ms`);
     console.log(`[BatchClassify] Response preview:`, response.content.substring(0, 300));
 
-    const parsed = JSON.parse(response.content);
+    // 处理AI返回的JSON - 去除markdown代码块
+    let jsonContent = response.content.trim();
+    // 去除markdown代码块标记
+    if (jsonContent.startsWith('```')) {
+      jsonContent = jsonContent.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '');
+    }
+    
+    const parsed = JSON.parse(jsonContent);
     const parsedResults = parsed.results || [];
     
     console.log(`[BatchClassify] Parsed ${parsedResults.length} results from AI`);
