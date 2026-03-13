@@ -250,13 +250,19 @@ export async function POST(request: NextRequest) {
           try {
             const batchResults = await batchClassifyLiterature(dimension, batch);
 
-            // 批量保存分类结果
+            // 批量保存分类结果（包含新增字段）
             const upsertData = batchResults.map(r => ({
               literature_id: r.literatureId,
               dimension_id: dimensionId,
               category: r.category,
               confidence: r.confidence,
               evidence: r.evidence,
+              has_control_group: r.hasControlGroup || false,
+              comparison_groups: r.comparisonGroups || [],
+              study_type: r.studyType || 'unknown',
+              effect_model_recommendation: r.effectModelRecommendation || 'uncertain',
+              sample_size: r.sampleSize,
+              heterogeneity_notes: r.heterogeneityNotes || '',
             }));
 
             const { error: upsertError } = await client
@@ -277,6 +283,10 @@ export async function POST(request: NextRequest) {
                 title: lit?.title || '',
                 category: r.category,
                 confidence: r.confidence,
+                hasControlGroup: r.hasControlGroup,
+                comparisonGroups: r.comparisonGroups,
+                studyType: r.studyType,
+                effectModelRecommendation: r.effectModelRecommendation,
               };
             });
           } catch (batchErr) {
@@ -398,6 +408,7 @@ export async function POST(request: NextRequest) {
 
 /**
  * 批量分类文献（使用新的LLM服务）
+ * 优化版：提高分类质量，识别对比研究，支持效应模型推荐
  */
 async function batchClassifyLiterature(
   dimension: { name: string; description?: string; categories: string[] },
@@ -413,48 +424,74 @@ async function batchClassifyLiterature(
   category: string;
   confidence: number;
   evidence: string;
+  hasControlGroup?: boolean;
+  comparisonGroups?: string[];
+  studyType?: string;
+  effectModelRecommendation?: 'fixed' | 'random' | 'uncertain';
+  sampleSize?: number;
+  heterogeneityNotes?: string;
 }>> {
-  // 构建文献列表文本 - 使用索引号作为标识，减少token消耗
+  // 构建文献列表文本 - 保持足够的内容供准确分类
   const literatureText = literatureBatch.map((lit, idx) => {
-    // 缩短内容预览，减少token
-    const contentPreview = lit.content.substring(0, 300);
-    return `[${idx + 1}] ${lit.title}${lit.year ? ` (${lit.year})` : ''}\n${contentPreview}`;
-  }).join('\n\n');
+    const contentPreview = lit.content.substring(0, 500);
+    return `[文献${idx + 1}]
+标题: ${lit.title}
+年份: ${lit.year || '未知'}
+摘要: ${contentPreview}`;
+  }).join('\n\n---\n\n');
 
-  const systemPrompt = `你是医学文献分类专家。根据维度对文献分类。
+  const systemPrompt = `你是一位资深的医学文献分类专家，专门负责文献Meta分析的预筛选工作。
 
-分类维度: ${dimension.name}
-${dimension.description ? `说明: ${dimension.description}` : ''}
-可选分类: ${(dimension.categories as string[]).join('、')}
+## 你的任务
+根据给定的分类维度，判断每篇文献是否可能包含该维度的相关数据，用于后续的亚组分析或敏感性分析。
 
-重要规则:
-1. 每篇文献必须返回一个分类结果
-2. confidence表示分类置信度(0.0-1.0)，0.7以上表示确定，0.5-0.7表示可能，0.5以下表示不确定
-3. evidence是从文献中提取的判断依据
+## 分类维度
+**维度名称**: ${dimension.name}
+${dimension.description ? `**维度说明**: ${dimension.description}` : ''}
+**可选分类**: ${(dimension.categories as string[]).join('、')}
 
-【重要】只返回纯JSON，不要使用markdown代码块，不要任何其他文字。返回格式:
-{"results":[{"index":1,"category":"选择的分类","confidence":0.8,"evidence":"判断依据"}]}`;
+## 分类原则（重要）
+1. **宽松纳入**: 只要文献可能包含该维度的相关数据即可纳入，后续数据提取时会进一步筛选
+2. **证据优先**: 基于文献标题和摘要中的关键词、研究对象、方法描述进行判断
+3. **置信度评估**:
+   - 0.8-1.0: 文献明确涉及该维度，有明确的数据或分析
+   - 0.6-0.8: 文献可能涉及该维度，需要进一步确认
+   - 0.4-0.6: 文献可能相关，但证据不充分
+   - 0.2-0.4: 文献可能不相关，但无法完全排除
+   - 0.0-0.2: 文献明确不涉及该维度
 
-  const userPrompt = `请对以下 ${literatureBatch.length} 篇文献进行分类：
+## 额外识别任务
+对于每篇文献，还需要识别：
+1. **对比组信息**: 文献是否包含对照组（如干预组vs对照组、不同年龄组对比等）
+2. **研究类型**: RCT、队列研究、病例对照研究、横断面研究等
+3. **效应模型建议**: 根据研究设计，推荐后续Meta分析使用固定效应还是随机效应模型
+   - 固定效应: 适用于研究间异质性较小的情况（相似的研究设计、人群、干预）
+   - 随机效应: 适用于研究间存在异质性的情况
+
+## 输出格式
+只返回纯JSON，不要markdown代码块。格式如下：
+{"results":[{"index":1,"category":"分类","confidence":0.85,"evidence":"判断依据","hasControlGroup":true,"comparisonGroups":["组A","组B"],"studyType":"RCT","effectModelRecommendation":"fixed","sampleSize":200,"heterogeneityNotes":"研究设计相似，建议固定效应模型"}]}`;
+
+  const userPrompt = `请对以下 ${literatureBatch.length} 篇文献进行详细分类分析：
 
 ${literatureText}
 
-请返回JSON格式的分类结果，每篇文献一个结果。`;
+请为每篇文献返回完整的分类结果，确保不遗漏任何文献。`;
 
   const startTime = Date.now();
   
   try {
-    // 使用新的LLM服务
+    // 使用新的LLM服务 - 提高温度以获得更准确的分类
     const response = await callLLM([
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ], {
       usageType: 'classification',
-      temperature: 0.2,
+      temperature: 0.3, // 稍微提高温度以获得更好的推理
     });
 
     console.log(`[BatchClassify] LLM call completed in ${Date.now() - startTime}ms`);
-    console.log(`[BatchClassify] Response preview:`, response.content.substring(0, 300));
+    console.log(`[BatchClassify] Response preview:`, response.content.substring(0, 500));
 
     // 处理AI返回的JSON - 去除markdown代码块
     let jsonContent = response.content.trim();
@@ -479,6 +516,12 @@ ${literatureText}
           category: found.category || dimension.categories[0],
           confidence: typeof found.confidence === 'number' ? found.confidence : 0.7,
           evidence: found.evidence || '',
+          hasControlGroup: found.hasControlGroup || false,
+          comparisonGroups: found.comparisonGroups || [],
+          studyType: found.studyType || 'unknown',
+          effectModelRecommendation: found.effectModelRecommendation || 'uncertain',
+          sampleSize: found.sampleSize,
+          heterogeneityNotes: found.heterogeneityNotes || '',
         };
       }
       
@@ -490,6 +533,12 @@ ${literatureText}
           category: orderedResult.category || dimension.categories[0],
           confidence: typeof orderedResult.confidence === 'number' ? orderedResult.confidence : 0.7,
           evidence: orderedResult.evidence || '',
+          hasControlGroup: orderedResult.hasControlGroup || false,
+          comparisonGroups: orderedResult.comparisonGroups || [],
+          studyType: orderedResult.studyType || 'unknown',
+          effectModelRecommendation: orderedResult.effectModelRecommendation || 'uncertain',
+          sampleSize: orderedResult.sampleSize,
+          heterogeneityNotes: orderedResult.heterogeneityNotes || '',
         };
       }
       
@@ -497,8 +546,13 @@ ${literatureText}
       return {
         literatureId: lit.id,
         category: dimension.categories[dimension.categories.length - 1] || '未分类',
-        confidence: 0.5,
+        confidence: 0.3,
         evidence: '未能从AI获取分类结果',
+        hasControlGroup: false,
+        comparisonGroups: [],
+        studyType: 'unknown',
+        effectModelRecommendation: 'uncertain' as const,
+        heterogeneityNotes: '',
       };
     });
     
@@ -513,6 +567,11 @@ ${literatureText}
       category: dimension.categories[dimension.categories.length - 1] || '未分类',
       confidence: 0.3,
       evidence: '分类处理失败',
+      hasControlGroup: false,
+      comparisonGroups: [],
+      studyType: 'unknown',
+      effectModelRecommendation: 'uncertain' as const,
+      heterogeneityNotes: '',
     }));
   }
 }

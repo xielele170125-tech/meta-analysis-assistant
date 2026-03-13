@@ -260,6 +260,12 @@ export default function Home() {
     category: string;
     confidence: number;
     evidence?: string;
+    has_control_group?: boolean;
+    comparison_groups?: string[];
+    study_type?: string;
+    effect_model_recommendation?: 'fixed' | 'random' | 'uncertain';
+    sample_size?: number;
+    heterogeneity_notes?: string;
     literature?: { id: string; title: string; authors?: string; year?: number };
   }>>([]);
   const [classifying, setClassifying] = useState(false);
@@ -2343,16 +2349,47 @@ export default function Home() {
                     const validCategories = categories.filter(cat => groupedResults[cat].length >= 2);
                     const invalidCategories = categories.filter(cat => groupedResults[cat].length < 2);
                     
+                    // 统计对照组和效应模型
+                    const withControlGroup = classificationResults.filter(r => r.has_control_group).length;
+                    const studyTypes = classificationResults.reduce((acc, r) => {
+                      const type = r.study_type || 'unknown';
+                      acc[type] = (acc[type] || 0) + 1;
+                      return acc;
+                    }, {} as Record<string, number>);
+                    const fixedCount = classificationResults.filter(r => r.effect_model_recommendation === 'fixed').length;
+                    const randomCount = classificationResults.filter(r => r.effect_model_recommendation === 'random').length;
+                    
                     return (
                     <div className="space-y-4">
                       {/* 统计概览 */}
                       <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between flex-wrap gap-4">
                           <div>
                             <h4 className="font-medium">分类统计</h4>
                             <p className="text-sm text-slate-600 mt-1">
                               共 <strong>{classificationResults.length}</strong> 篇文献，分为 <strong>{categories.length}</strong> 个类别
                             </p>
+                          </div>
+                          {/* 研究特征统计 */}
+                          <div className="flex gap-4 text-sm">
+                            {withControlGroup > 0 && (
+                              <div className="flex items-center gap-1">
+                                <Badge variant="default" className="bg-green-500">对照组</Badge>
+                                <span>{withControlGroup}/{classificationResults.length}</span>
+                              </div>
+                            )}
+                            {fixedCount > randomCount && fixedCount > 0 && (
+                              <div className="flex items-center gap-1">
+                                <Badge variant="default" className="bg-blue-500">固定效应</Badge>
+                                <span>{fixedCount}篇建议</span>
+                              </div>
+                            )}
+                            {randomCount >= fixedCount && randomCount > 0 && (
+                              <div className="flex items-center gap-1">
+                                <Badge variant="default" className="bg-orange-500">随机效应</Badge>
+                                <span>{randomCount}篇建议</span>
+                              </div>
+                            )}
                           </div>
                           <div className="flex gap-2">
                             <Button 
@@ -2362,6 +2399,22 @@ export default function Home() {
                             >
                               <Download className="h-4 w-4 mr-1" />
                               批量导出
+                            </Button>
+                            {/* 效应模型推荐按钮 */}
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={async () => {
+                                const res = await fetch(`/api/literature/effect-model-recommendation?dimensionId=${selectedDimension}`);
+                                const data = await res.json();
+                                if (data.success) {
+                                  const { recommendation, recommendationReason, statistics, heterogeneityAssessment } = data.data;
+                                  alert(`【效应模型推荐】\n\n推荐模型: ${recommendation === 'fixed' ? '固定效应模型' : recommendation === 'random' ? '随机效应模型' : '待确定'}\n\n理由: ${recommendationReason}\n\n【异质性评估】\n等级: ${heterogeneityAssessment.level}\n${heterogeneityAssessment.factors.length > 0 ? '因素: ' + heterogeneityAssessment.factors.join('、') : ''}\n建议: ${heterogeneityAssessment.suggestion}\n\n【统计信息】\n总文献: ${statistics.total}篇\n有对照组: ${statistics.withControlGroup}篇 (${statistics.controlGroupRatio})\n研究类型: ${Object.entries(statistics.studyTypes).map(([k, v]) => `${k}(${v})`).join(', ')}`);
+                                }
+                              }}
+                            >
+                              <Brain className="h-4 w-4 mr-1" />
+                              效应模型推荐
                             </Button>
                             <Button 
                               variant="default" 
@@ -2501,6 +2554,9 @@ export default function Home() {
                                   <TableHead>文献</TableHead>
                                   <TableHead>分类</TableHead>
                                   <TableHead>置信度</TableHead>
+                                  <TableHead>研究类型</TableHead>
+                                  <TableHead>对照组</TableHead>
+                                  <TableHead>效应模型建议</TableHead>
                                   <TableHead>证据</TableHead>
                                   <TableHead>操作</TableHead>
                                 </TableRow>
@@ -2533,6 +2589,39 @@ export default function Home() {
                                         </div>
                                         <span className="text-xs">{(result.confidence * 100).toFixed(0)}%</span>
                                       </div>
+                                    </TableCell>
+                                    <TableCell>
+                                      <Badge variant="outline" className="text-xs">
+                                        {result.study_type === 'RCT' ? '🔬 RCT' : 
+                                         result.study_type === 'cohort' ? '👥 队列研究' :
+                                         result.study_type === 'case_control' ? '📋 病例对照' :
+                                         result.study_type === 'cross_sectional' ? '📊 横断面' :
+                                         result.study_type || '未知'}
+                                      </Badge>
+                                    </TableCell>
+                                    <TableCell>
+                                      {result.has_control_group ? (
+                                        <div className="flex flex-col gap-0.5">
+                                          <Badge variant="default" className="bg-green-500 text-xs">有对照组</Badge>
+                                          {result.comparison_groups && result.comparison_groups.length > 0 && (
+                                            <span className="text-xs text-slate-500" title={result.comparison_groups.join(' vs ')}>
+                                              {result.comparison_groups.slice(0, 2).join(' vs ')}
+                                              {result.comparison_groups.length > 2 && '...'}
+                                            </span>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <Badge variant="secondary" className="text-xs">无对照组</Badge>
+                                      )}
+                                    </TableCell>
+                                    <TableCell>
+                                      {result.effect_model_recommendation === 'fixed' ? (
+                                        <Badge variant="default" className="bg-blue-500 text-xs">固定效应</Badge>
+                                      ) : result.effect_model_recommendation === 'random' ? (
+                                        <Badge variant="default" className="bg-orange-500 text-xs">随机效应</Badge>
+                                      ) : (
+                                        <Badge variant="outline" className="text-xs">待确定</Badge>
+                                      )}
                                     </TableCell>
                                     <TableCell>
                                       <p className="text-xs text-slate-600 max-w-xs truncate" title={result.evidence}>
