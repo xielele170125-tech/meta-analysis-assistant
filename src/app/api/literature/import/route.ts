@@ -28,19 +28,15 @@ interface ImportResult {
 }
 
 /**
- * 通过 DOI 获取开放获取 PDF 链接
- * 使用 Unpaywall API: https://unpaywall.org/products/api
+ * 通过 Unpaywall API 获取开放获取 PDF 链接
  */
-async function getPDFByDOI(doi: string): Promise<{ url: string; source: string } | null> {
+async function getPDFByUnpaywall(doi: string): Promise<{ url: string; source: string } | null> {
   try {
-    // Unpaywall 要求使用真实的邮箱地址
     const email = 'meta-analysis-research@academic-tool.org';
     const apiUrl = `https://api.unpaywall.org/v2/${encodeURIComponent(doi)}?email=${email}`;
 
-    console.log(`[PDF Download] Checking Unpaywall for DOI: ${doi}`);
-
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 增加到 30 秒超时
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     const response = await fetch(apiUrl, {
       headers: { 
@@ -52,45 +48,195 @@ async function getPDFByDOI(doi: string): Promise<{ url: string; source: string }
 
     clearTimeout(timeoutId);
 
-    if (!response.ok) {
-      if (response.status === 404) {
-        console.log(`[PDF Download] DOI ${doi} not found in Unpaywall database (404)`);
-      } else {
-        console.log(`[PDF Download] Unpaywall API error: ${response.status}`);
-      }
-      return null;
-    }
+    if (!response.ok) return null;
 
     const data = await response.json();
-    console.log(`[PDF Download] Unpaywall response: is_oa=${data.is_oa}, title="${data.title?.substring(0, 50)}..."`);
     
-    // 检查是否有开放获取版本
-    if (data.is_oa) {
-      // 只使用直接 PDF 链接（不使用落地页 URL，因为那不是 PDF）
-      const pdfUrl = data.best_oa_location?.url_for_pdf;
-      
-      if (pdfUrl) {
-        console.log(`[PDF Download] Found PDF URL: ${pdfUrl}`);
-        return { 
-          url: pdfUrl, 
-          source: data.best_oa_location?.host_type || 'repository' 
-        };
-      }
-      
-      // 有 OA 但没有直接 PDF 链接
-      console.log(`[PDF Download] Article is OA but no direct PDF link available`);
+    if (data.is_oa && data.best_oa_location?.url_for_pdf) {
+      return { 
+        url: data.best_oa_location.url_for_pdf, 
+        source: 'unpaywall' 
+      };
     }
     
-    console.log(`[PDF Download] No open access PDF found for DOI: ${doi}`);
     return null;
   } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      console.error(`[PDF Download] Timeout checking DOI ${doi}`);
-    } else {
-      console.error(`[PDF Download] Error checking DOI ${doi}:`, error);
-    }
+    console.error(`[Unpaywall] Error:`, error);
     return null;
   }
+}
+
+/**
+ * 通过 Semantic Scholar API 获取 PDF 链接
+ */
+async function getPDFBySemanticScholar(doi: string): Promise<{ url: string; source: string } | null> {
+  try {
+    const apiUrl = `https://api.semanticscholar.org/graph/v1/paper/DOI:${encodeURIComponent(doi)}?fields=openAccessPdf`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    const response = await fetch(apiUrl, {
+      headers: { 
+        'Accept': 'application/json',
+        'User-Agent': 'Meta-Analysis-Tool/1.0',
+      },
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    
+    if (data.openAccessPdf?.url) {
+      return { 
+        url: data.openAccessPdf.url, 
+        source: 'semantic_scholar' 
+      };
+    }
+    
+    return null;
+  } catch (error) {
+    console.error(`[Semantic Scholar] Error:`, error);
+    return null;
+  }
+}
+
+/**
+ * 通过 PubMed Central API 获取 PDF 链接
+ */
+async function getPDFByPMC(doi: string): Promise<{ url: string; source: string } | null> {
+  try {
+    // 先通过 DOI 查找 PMID
+    const searchUrl = `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(doi)}&format=json`;
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    const searchResponse = await fetch(searchUrl, {
+      headers: { 'User-Agent': 'Meta-Analysis-Tool/1.0' },
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!searchResponse.ok) return null;
+
+    const searchData = await searchResponse.json();
+    const pmid = searchData.result?.uids?.[0];
+
+    if (!pmid) return null;
+
+    // 检查是否有 PMC 全文
+    const pmcUrl = `https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi?id=${pmid}`;
+    const pmcController = new AbortController();
+    const pmcTimeoutId = setTimeout(() => pmcController.abort(), 15000);
+
+    const pmcResponse = await fetch(pmcUrl, {
+      headers: { 'User-Agent': 'Meta-Analysis-Tool/1.0' },
+      signal: pmcController.signal,
+    });
+
+    clearTimeout(pmcTimeoutId);
+
+    if (!pmcResponse.ok) return null;
+
+    const pmcText = await pmcResponse.text();
+    
+    // 解析 XML 找到 PDF 链接
+    const pdfMatch = pmcText.match(/<link[^>]*format="pdf"[^>]*href="([^"]+)"/i);
+    if (pdfMatch) {
+      return { 
+        url: pdfMatch[1], 
+        source: 'pmc' 
+      };
+    }
+
+    return null;
+  } catch (error) {
+    console.error(`[PMC] Error:`, error);
+    return null;
+  }
+}
+
+/**
+ * 通过 CORE API 获取 PDF 链接
+ */
+async function getPDFByCORE(doi: string): Promise<{ url: string; source: string } | null> {
+  try {
+    // CORE API 需要注册获取 API key，这里使用免费的搜索接口
+    const searchUrl = `https://api.core.ac.uk/v3/search/works?q=doi:"${encodeURIComponent(doi)}"&limit=1`;
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    const response = await fetch(searchUrl, {
+      headers: { 
+        'Accept': 'application/json',
+        'User-Agent': 'Meta-Analysis-Tool/1.0',
+      },
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    
+    if (data.results?.[0]?.downloadUrl) {
+      return { 
+        url: data.results[0].downloadUrl, 
+        source: 'core' 
+      };
+    }
+    
+    return null;
+  } catch (error) {
+    console.error(`[CORE] Error:`, error);
+    return null;
+  }
+}
+
+/**
+ * 综合多个来源获取 PDF
+ * 按优先级依次尝试：Unpaywall -> Semantic Scholar -> PMC -> CORE
+ */
+async function getPDFByDOI(doi: string): Promise<{ url: string; source: string } | null> {
+  console.log(`[PDF Download] Searching for DOI: ${doi}`);
+  
+  // 1. Unpaywall - 最全面的开放获取数据库
+  const unpaywallResult = await getPDFByUnpaywall(doi);
+  if (unpaywallResult) {
+    console.log(`[PDF Download] Found via Unpaywall`);
+    return unpaywallResult;
+  }
+  
+  // 2. Semantic Scholar - 学术搜索引擎
+  const ssResult = await getPDFBySemanticScholar(doi);
+  if (ssResult) {
+    console.log(`[PDF Download] Found via Semantic Scholar`);
+    return ssResult;
+  }
+  
+  // 3. PubMed Central - 生物医学文献
+  const pmcResult = await getPDFByPMC(doi);
+  if (pmcResult) {
+    console.log(`[PDF Download] Found via PMC`);
+    return pmcResult;
+  }
+  
+  // 4. CORE - 开放获取论文聚合
+  const coreResult = await getPDFByCORE(doi);
+  if (coreResult) {
+    console.log(`[PDF Download] Found via CORE`);
+    return coreResult;
+  }
+  
+  console.log(`[PDF Download] No PDF found from any source`);
+  return null;
 }
 
 /**

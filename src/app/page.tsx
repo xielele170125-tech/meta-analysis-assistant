@@ -249,6 +249,14 @@ export default function Home() {
     completed: number;
     current: string;
   } | null>(null);
+  // 批量关联PDF状态
+  const [attachingPdf, setAttachingPdf] = useState(false);
+  const [attachResult, setAttachResult] = useState<{
+    total: number;
+    attached: number;
+    notFound: number;
+    failed: number;
+  } | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -486,6 +494,46 @@ export default function Home() {
     } finally {
       setImporting(false);
       // 重置文件输入
+      e.target.value = '';
+    }
+  };
+
+  // 批量关联PDF到已有文献
+  const handleAttachPdf = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setAttachingPdf(true);
+    try {
+      const formData = new FormData();
+      for (let i = 0; i < files.length; i++) {
+        formData.append('files', files[i]);
+      }
+
+      const res = await fetch('/api/literature/attach-pdf', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        setAttachResult(data.data);
+        await loadLiterature();
+        
+        if (data.data.attached > 0) {
+          alert(`成功关联 ${data.data.attached} 个 PDF 文件`);
+        }
+        if (data.data.notFound > 0) {
+          alert(`${data.data.notFound} 个文件无法匹配到已有文献，已创建新文献记录`);
+        }
+      } else {
+        alert('关联失败: ' + data.error);
+      }
+    } catch (error) {
+      console.error('Attach PDF error:', error);
+      alert('关联失败');
+    } finally {
+      setAttachingPdf(false);
       e.target.value = '';
     }
   };
@@ -1069,6 +1117,17 @@ export default function Home() {
                     >
                       {importing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
                       {importing ? '导入中...' : '导入EndNote'}
+                    </Button>
+                    {/* 关联PDF到已有文献 */}
+                    <input type="file" id="attach-pdf" className="hidden" accept=".pdf" onChange={handleAttachPdf} disabled={attachingPdf} multiple />
+                    <Button 
+                      variant="outline"
+                      onClick={() => document.getElementById('attach-pdf')?.click()}
+                      disabled={attachingPdf || literature.length === 0}
+                      title="将本地PDF关联到已导入的文献"
+                    >
+                      {attachingPdf ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileUp className="mr-2 h-4 w-4" />}
+                      {attachingPdf ? '关联中...' : '关联PDF'}
                     </Button>
                     {/* 上传PDF按钮 */}
                     <input type="file" id="file-upload" className="hidden" accept=".pdf,.doc,.docx" onChange={handleUpload} disabled={uploading} multiple />
