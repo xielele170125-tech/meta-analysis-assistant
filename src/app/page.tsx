@@ -499,6 +499,71 @@ export default function Home() {
     }
   };
 
+  // 为单个文献上传PDF
+  const handleUploadPdfForLiterature = async (e: React.ChangeEvent<HTMLInputElement>, literatureId: string) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      // 上传PDF到对象存储
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const uploadRes = await fetch('/api/literature/upload', { 
+        method: 'POST', 
+        body: formData 
+      });
+      const uploadData = await uploadRes.json();
+      
+      if (!uploadData.success) {
+        throw new Error(uploadData.error);
+      }
+
+      // 更新文献记录
+      const updateRes = await fetch('/api/literature', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: literatureId,
+          fileKey: uploadData.data.fileKey,
+          fileName: file.name,
+        }),
+      });
+      const updateResult = await updateRes.json();
+      
+      if (!updateResult.success) {
+        throw new Error(updateResult.error);
+      }
+
+      // 刷新文献列表
+      await loadLiterature();
+      alert('PDF上传成功');
+
+      // 如果有API Key，自动处理文献
+      if (apiKey) {
+        fetch('/api/literature/process', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            literatureId: literatureId,
+            fileUrl: uploadData.data.fileUrl,
+            apiKey: apiKey,
+          }),
+        }).then(async () => {
+          await loadLiterature();
+          await loadExtractedData();
+        }).catch((error) => {
+          console.error('Process error:', error);
+        });
+      }
+    } catch (error) {
+      console.error('Upload PDF error:', error);
+      alert(error instanceof Error ? error.message : '上传失败');
+    } finally {
+      e.target.value = '';
+    }
+  };
+
   // 批量关联PDF到已有文献
   const handleAttachPdf = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -1119,16 +1184,16 @@ export default function Home() {
                       {importing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
                       {importing ? '导入中...' : '导入EndNote'}
                     </Button>
-                    {/* 关联PDF到已有文献 */}
+                    {/* 关联PDF到已有文献 - 支持多选，自动匹配 */}
                     <input type="file" id="attach-pdf" className="hidden" accept=".pdf" onChange={handleAttachPdf} disabled={attachingPdf} multiple />
                     <Button 
                       variant="outline"
                       onClick={() => document.getElementById('attach-pdf')?.click()}
                       disabled={attachingPdf || literature.length === 0}
-                      title="将本地PDF关联到已导入的文献"
+                      title="选择本地PDF文件，自动匹配到已导入的文献"
                     >
                       {attachingPdf ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileUp className="mr-2 h-4 w-4" />}
-                      {attachingPdf ? '关联中...' : '关联PDF'}
+                      {attachingPdf ? '关联中...' : '批量关联PDF'}
                     </Button>
                     {/* 上传PDF按钮 */}
                     <input type="file" id="file-upload" className="hidden" accept=".pdf,.doc,.docx" onChange={handleUpload} disabled={uploading} multiple />
@@ -1290,7 +1355,25 @@ export default function Home() {
                                 <FileText className="h-3 w-3" /> 已上传
                               </Badge>
                             ) : (
-                              <Badge variant="outline" className="text-slate-400">无PDF</Badge>
+                              <div className="flex items-center gap-1">
+                                <Badge variant="outline" className="text-slate-400">无PDF</Badge>
+                                <input 
+                                  type="file" 
+                                  id={`upload-pdf-${lit.id}`} 
+                                  className="hidden" 
+                                  accept=".pdf" 
+                                  onChange={(e) => handleUploadPdfForLiterature(e, lit.id)}
+                                />
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  onClick={() => document.getElementById(`upload-pdf-${lit.id}`)?.click()}
+                                  title="上传PDF"
+                                  className="h-6 px-2"
+                                >
+                                  <FileUp className="h-3 w-3" />
+                                </Button>
+                              </div>
                             )}
                           </TableCell>
                           <TableCell>

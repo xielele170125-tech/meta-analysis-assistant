@@ -99,3 +99,41 @@ export async function DELETE(request: NextRequest) {
     );
   }
 }
+
+// 更新文献记录（如添加PDF）
+export async function PUT(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { id, fileKey, fileName, status } = body;
+
+    if (!id) {
+      return NextResponse.json({ error: '缺少文献ID' }, { status: 400 });
+    }
+
+    const client = getSupabaseClient();
+
+    const updateData: Record<string, unknown> = {};
+    if (fileKey !== undefined) updateData.file_key = fileKey;
+    if (fileName !== undefined) updateData.file_name = fileName;
+    if (status !== undefined) updateData.status = status;
+
+    const { data, error } = await client
+      .from('literature')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, data });
+  } catch (error) {
+    console.error('Update literature error:', error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : '更新失败' },
+      { status: 500 }
+    );
+  }
+}
