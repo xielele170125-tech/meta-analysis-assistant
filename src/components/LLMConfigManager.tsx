@@ -75,8 +75,8 @@ interface LLMConfigForm {
   apiKey: string;
   baseUrl: string;
   model: string;
-  temperature: number;
-  maxTokens: number;
+  temperature: number | '';
+  maxTokens: number | '';
   isDefault: boolean;
   isEnabled: boolean;
 }
@@ -176,8 +176,8 @@ export function LLMConfigManager() {
           apiKey: form.apiKey,
           baseUrl: form.baseUrl,
           model: form.model,
-          temperature: form.temperature,
-          maxTokens: form.maxTokens,
+          temperature: form.temperature === '' ? 0.7 : form.temperature,
+          maxTokens: form.maxTokens === '' ? 4096 : form.maxTokens,
           isDefault: form.isDefault,
           isEnabled: form.isEnabled,
         }),
@@ -207,8 +207,8 @@ export function LLMConfigManager() {
       apiKey: '', // 需要重新输入
       baseUrl: config.base_url || '',
       model: config.model,
-      temperature: config.temperature !== null ? config.temperature : 0.7,
-      maxTokens: config.max_tokens !== null ? config.max_tokens : 4096,
+      temperature: config.temperature ?? '',
+      maxTokens: config.max_tokens ?? '',
       isDefault: config.is_default,
       isEnabled: config.is_enabled,
     });
@@ -507,7 +507,7 @@ export function LLMConfigManager() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="temperature">温度</Label>
+                <Label htmlFor="temperature">温度 (0-2)</Label>
                 <Input
                   id="temperature"
                   type="number"
@@ -516,9 +516,10 @@ export function LLMConfigManager() {
                   step={0.1}
                   value={form.temperature}
                   onChange={(e) => {
-                    const val = parseFloat(e.target.value);
-                    setForm({ ...form, temperature: isNaN(val) ? 0.7 : val });
+                    const val = e.target.value;
+                    setForm({ ...form, temperature: val === '' ? '' : parseFloat(val) });
                   }}
+                  placeholder="默认 0.7"
                 />
               </div>
               <div className="space-y-2">
@@ -529,9 +530,10 @@ export function LLMConfigManager() {
                   min={1}
                   value={form.maxTokens}
                   onChange={(e) => {
-                    const val = parseInt(e.target.value);
-                    setForm({ ...form, maxTokens: isNaN(val) ? 4096 : val });
+                    const val = e.target.value;
+                    setForm({ ...form, maxTokens: val === '' ? '' : parseInt(val) });
                   }}
+                  placeholder="默认 4096"
                 />
               </div>
             </div>
