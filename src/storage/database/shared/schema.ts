@@ -548,3 +548,81 @@ export type NetworkComparison = typeof networkComparisons.$inferSelect;
 export type TreatmentRanking = typeof treatmentRankings.$inferSelect;
 export type NetworkStructure = typeof networkStructure.$inferSelect;
 export type ConsistencyResult = typeof consistencyResults.$inferSelect;
+
+// ==================== LLM配置相关表 ====================
+
+// LLM模型配置表
+export const llmConfigs = pgTable(
+  "llm_configs",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    // 配置名称
+    name: varchar("name", { length: 255 }).notNull(),
+    // 提供商: deepseek, openai, claude, qwen, zhipu, kimi, custom
+    provider: varchar("provider", { length: 50 }).notNull(),
+    // API密钥（加密存储）
+    apiKey: text("api_key").notNull(),
+    // API基础URL（可选，用于自定义端点）
+    baseUrl: varchar("base_url", { length: 500 }),
+    // 模型名称
+    model: varchar("model", { length: 100 }).notNull(),
+    // 温度参数
+    temperature: real("temperature").default(0.7),
+    // 最大token数
+    maxTokens: integer("max_tokens").default(4096),
+    // 是否为默认配置
+    isDefault: boolean("is_default").default(false),
+    // 是否启用
+    isEnabled: boolean("is_enabled").default(true),
+    // 配置元数据（JSON）
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("llm_configs_provider_idx").on(table.provider),
+    index("llm_configs_default_idx").on(table.isDefault),
+  ]
+);
+
+// LLM使用记录表
+export const llmUsageLogs = pgTable(
+  "llm_usage_logs",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    // 配置ID
+    configId: varchar("config_id", { length: 36 }).notNull(),
+    // 使用场景: extraction, classification, quality_assessment, network_analysis
+    usageType: varchar("usage_type", { length: 50 }).notNull(),
+    // 输入token数
+    promptTokens: integer("prompt_tokens"),
+    // 输出token数
+    completionTokens: integer("completion_tokens"),
+    // 总token数
+    totalTokens: integer("total_tokens"),
+    // 是否成功
+    isSuccess: boolean("is_success").default(true),
+    // 错误信息
+    errorMessage: text("error_message"),
+    // 响应时间（毫秒）
+    responseTime: integer("response_time"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("llm_usage_logs_config_idx").on(table.configId),
+    index("llm_usage_logs_type_idx").on(table.usageType),
+    index("llm_usage_logs_created_idx").on(table.createdAt),
+  ]
+);
+
+// LLM配置类型
+export type LLMConfig = typeof llmConfigs.$inferSelect;
+export type LLMUsageLog = typeof llmUsageLogs.$inferSelect;

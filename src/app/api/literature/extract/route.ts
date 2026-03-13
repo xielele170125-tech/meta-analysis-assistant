@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import OpenAI from 'openai';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
+import { callLLM, getDefaultLLMConfig } from '@/lib/llm/service';
 
-// DeepSeek 数据提取提示词 - 优化版（含结局指标标准化和亚组识别）
+// 数据提取提示词 - 优化版（含结局指标标准化和亚组识别）
 const EXTRACTION_PROMPT = `你是一位专业的Meta分析数据提取专家。请从以下文献内容中仔细提取Meta分析所需的数据。
 
 ## 重要说明
@@ -107,7 +107,7 @@ export async function POST(request: NextRequest) {
   try {
     const { literatureId, content, apiKey } = await request.json();
 
-    if (!content || !apiKey || !literatureId) {
+    if (!content || !literatureId) {
       return NextResponse.json(
         { error: '缺少必要参数' },
         { status: 400 }
@@ -121,30 +121,57 @@ export async function POST(request: NextRequest) {
       .update({ status: 'extracting' })
       .eq('id', literatureId);
 
-    // 调用 DeepSeek API
-    const openai = new OpenAI({
-      baseURL: 'https://api.deepseek.com/v1',
-      apiKey: apiKey,
-    });
-
-    const completion = await openai.chat.completions.create({
-      model: 'deepseek-reasoner',
-      messages: [
+    // 获取LLM配置（优先使用前端传递的API Key，否则使用默认配置）
+    let responseContent: string;
+    
+    try {
+      // 尝试使用新的LLM服务
+      const response = await callLLM(
+        [
+          {
+            role: 'system',
+            content: '你是一位专业的Meta分析数据提取专家，擅长从医学文献中提取结构化数据。',
+          },
+          {
+            role: 'user',
+            content: EXTRACTION_PROMPT + content,
+          },
+        ],
         {
-          role: 'system',
-          content: '你是一位专业的Meta分析数据提取专家，擅长从医学文献中提取结构化数据。',
-        },
-        {
-          role: 'user',
-          content: EXTRACTION_PROMPT + content,
-        },
-      ],
-    });
+          usageType: 'extraction',
+          temperature: 0.1,
+        }
+      );
+      responseContent = response.content;
+    } catch (llmError) {
+      // 如果LLM服务不可用，尝试使用旧的API Key方式（向后兼容）
+      if (!apiKey) {
+        throw llmError;
+      }
+      
+      // 使用旧的OpenAI方式调用DeepSeek
+      const { default: OpenAI } = await import('openai');
+      const openai = new OpenAI({
+        baseURL: 'https://api.deepseek.com/v1',
+        apiKey: apiKey,
+      });
 
-    const responseContent = completion.choices[0].message.content || '';
-    // DeepSeek Reasoner 返回的推理内容（需要类型断言）
-    const message = completion.choices[0].message as { content: string | null; reasoning_content?: string };
-    const reasoning = message.reasoning_content || '';
+      const completion = await openai.chat.completions.create({
+        model: 'deepseek-chat',
+        messages: [
+          {
+            role: 'system',
+            content: '你是一位专业的Meta分析数据提取专家，擅长从医学文献中提取结构化数据。',
+          },
+          {
+            role: 'user',
+            content: EXTRACTION_PROMPT + content,
+          },
+        ],
+      });
+
+      responseContent = completion.choices[0].message.content || '';
+    }
 
     // 解析JSON结果
     let extractedStudies: Array<{
@@ -305,7 +332,6 @@ export async function POST(request: NextRequest) {
       success: true,
       data: {
         studies: processedStudies,
-        reasoning: reasoning,
         rawResponse: responseContent,
       },
     });

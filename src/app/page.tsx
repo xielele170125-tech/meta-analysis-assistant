@@ -37,6 +37,7 @@ import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, 
 import QualityAssessmentTable from '@/components/QualityAssessmentTable';
 import NetworkAnalysisTab from '@/components/NetworkAnalysisTab';
 import DimensionDataFilter from '@/components/DimensionDataFilter';
+import { LLMConfigManager } from '@/components/LLMConfigManager';
 
 // 类型定义
 interface Literature {
@@ -1729,16 +1730,32 @@ export default function Home() {
       <main className="container mx-auto px-4 py-6">
         {showSettings && (
           <Card className="mb-6">
-            <CardHeader><CardTitle className="text-base">设置</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label>DeepSeek API Key</Label>
-                <div className="flex gap-2">
-                  <Input type="password" placeholder="输入你的 DeepSeek API Key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-                  <Button onClick={saveApiKey}>保存</Button>
-                </div>
-                <p className="text-xs text-slate-500">从 <a href="https://platform.deepseek.com" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">DeepSeek 平台</a> 获取</p>
-              </div>
+            <CardHeader>
+              <CardTitle className="text-base">系统设置</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Tabs defaultValue="llm">
+                <TabsList className="mb-4">
+                  <TabsTrigger value="llm">模型配置</TabsTrigger>
+                  <TabsTrigger value="legacy">旧版配置</TabsTrigger>
+                </TabsList>
+                <TabsContent value="llm">
+                  <LLMConfigManager />
+                </TabsContent>
+                <TabsContent value="legacy">
+                  <div className="space-y-2">
+                    <Label>DeepSeek API Key (已废弃)</Label>
+                    <p className="text-sm text-muted-foreground mb-2">
+                      此配置已废弃，请使用上方的"模型配置"管理您的API密钥
+                    </p>
+                    <div className="flex gap-2">
+                      <Input type="password" placeholder="输入你的 DeepSeek API Key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+                      <Button onClick={saveApiKey}>保存</Button>
+                    </div>
+                    <p className="text-xs text-slate-500">从 <a href="https://platform.deepseek.com" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">DeepSeek 平台</a> 获取</p>
+                  </div>
+                </TabsContent>
+              </Tabs>
             </CardContent>
           </Card>
         )}
