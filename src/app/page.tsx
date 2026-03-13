@@ -32,7 +32,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet, Code2, TriangleAlert, TrendingUp, Search, GitCompare, Info, RefreshCw, ClipboardCheck, Star, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet, Code2, TriangleAlert, TrendingUp, Search, GitCompare, Info, RefreshCw, ClipboardCheck, Star, AlertTriangle, CheckCircle2, Layers, FolderTree, Plus, X } from 'lucide-react';
 import QualityAssessmentTable from '@/components/QualityAssessmentTable';
 
 // 类型定义
@@ -237,6 +237,27 @@ export default function Home() {
   } | null>(null);
   const [showCompare, setShowCompare] = useState(false);
   
+  // 文献分类相关状态
+  const [classificationDimensions, setClassificationDimensions] = useState<Array<{
+    id: string;
+    name: string;
+    description?: string;
+    categories: string[];
+  }>>([]);
+  const [selectedDimension, setSelectedDimension] = useState<string | null>(null);
+  const [classificationResults, setClassificationResults] = useState<Array<{
+    id: string;
+    literature_id: string;
+    dimension_id: string;
+    category: string;
+    confidence: number;
+    evidence?: string;
+    literature?: { id: string; title: string; authors?: string; year?: number };
+  }>>([]);
+  const [classifying, setClassifying] = useState(false);
+  const [showNewDimensionDialog, setShowNewDimensionDialog] = useState(false);
+  const [newDimension, setNewDimension] = useState({ name: '', description: '', categories: '' });
+  
   // 质量评分相关状态
   const [qualityAssessments, setQualityAssessments] = useState<QualityAssessment[]>([]);
   const [selectedAssessment, setSelectedAssessment] = useState<QualityAssessment | null>(null);
@@ -276,6 +297,13 @@ export default function Home() {
     setMounted(true);
     const savedKey = localStorage.getItem('deepseek_api_key');
     if (savedKey) setApiKey(savedKey);
+    // 加载分类维度
+    fetch('/api/literature/classify?action=dimensions')
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) setClassificationDimensions(data.data);
+      })
+      .catch(err => console.error('Load dimensions error:', err));
   }, []);
 
   const loadLiterature = useCallback(async () => {
@@ -331,6 +359,158 @@ export default function Home() {
   }, []);
 
   // 加载质量评分数据
+  // 加载分类维度
+  const loadClassificationDimensions = useCallback(async () => {
+    try {
+      const res = await fetch('/api/literature/classify?action=dimensions');
+      const data = await res.json();
+      if (data.success) setClassificationDimensions(data.data);
+    } catch (error) {
+      console.error('Load dimensions error:', error);
+    }
+  }, []);
+
+  // 加载分类结果
+  const loadClassificationResults = useCallback(async (dimensionId: string) => {
+    try {
+      const res = await fetch(`/api/literature/classify?action=results&dimensionId=${dimensionId}`);
+      const data = await res.json();
+      if (data.success) setClassificationResults(data.data);
+    } catch (error) {
+      console.error('Load classification results error:', error);
+    }
+  }, []);
+
+  // 创建分类维度
+  const createDimension = async () => {
+    if (!newDimension.name || !newDimension.categories) {
+      alert('请填写维度名称和分类选项');
+      return;
+    }
+    
+    const categories = newDimension.categories.split('\n').map(c => c.trim()).filter(c => c);
+    if (categories.length < 2) {
+      alert('请至少输入两个分类选项');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/literature/classify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create_dimension',
+          name: newDimension.name,
+          description: newDimension.description,
+          categories,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setShowNewDimensionDialog(false);
+        setNewDimension({ name: '', description: '', categories: '' });
+        loadClassificationDimensions();
+      } else {
+        alert('创建失败: ' + data.error);
+      }
+    } catch (error) {
+      console.error('Create dimension error:', error);
+      alert('创建失败');
+    }
+  };
+
+  // 删除分类维度
+  const deleteDimension = async (dimensionId: string) => {
+    if (!confirm('确定要删除此分类维度吗？相关的分类结果也会被删除。')) return;
+    
+    try {
+      const res = await fetch('/api/literature/classify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete_dimension', dimensionId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        loadClassificationDimensions();
+        if (selectedDimension === dimensionId) {
+          setSelectedDimension(null);
+          setClassificationResults([]);
+        }
+      }
+    } catch (error) {
+      console.error('Delete dimension error:', error);
+    }
+  };
+
+  // 执行AI分类
+  const classifyLiterature = async () => {
+    if (!selectedDimension || !apiKey) {
+      alert('请选择分类维度并配置API Key');
+      return;
+    }
+
+    setClassifying(true);
+    try {
+      const res = await fetch('/api/literature/classify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'classify',
+          dimensionId: selectedDimension,
+          apiKey,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(`分类完成！共分类 ${data.data.classified} 篇文献`);
+        loadClassificationResults(selectedDimension);
+      } else {
+        alert('分类失败: ' + data.error);
+      }
+    } catch (error) {
+      console.error('Classify error:', error);
+      alert('分类失败');
+    } finally {
+      setClassifying(false);
+    }
+  };
+
+  // 按分类导出
+  const exportByCategory = async () => {
+    if (!selectedDimension) return;
+
+    const dimension = classificationDimensions.find(d => d.id === selectedDimension);
+    if (!dimension) return;
+
+    // 按每个分类导出
+    for (const category of dimension.categories as string[]) {
+      const res = await fetch(`/api/literature/export?format=ris&dimensionId=${selectedDimension}&category=${encodeURIComponent(category)}`);
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${dimension.name}_${category}.ris`;
+        a.click();
+        window.URL.revokeObjectURL(url);
+      }
+    }
+  };
+
+  // 导出单篇文献
+  const exportSingleLiterature = async (literatureId: string) => {
+    const res = await fetch(`/api/literature/export?format=ris&ids=${literatureId}`);
+    if (res.ok) {
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'literature.ris';
+      a.click();
+      window.URL.revokeObjectURL(url);
+    }
+  };
+
   const loadQualityAssessments = useCallback(async () => {
     try {
       const res = await fetch('/api/quality-assessment');
@@ -1223,8 +1403,9 @@ export default function Home() {
         )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-5 mb-6">
+          <TabsList className="grid w-full grid-cols-6 mb-6">
             <TabsTrigger value="literature" className="gap-2"><Upload className="h-4 w-4" /> 文献管理</TabsTrigger>
+            <TabsTrigger value="classify" className="gap-2"><Layers className="h-4 w-4" /> 文献分类</TabsTrigger>
             <TabsTrigger value="data" className="gap-2"><Database className="h-4 w-4" /> 数据提取</TabsTrigger>
             <TabsTrigger value="compare" className="gap-2"><Search className="h-4 w-4" /> 数据对比</TabsTrigger>
             <TabsTrigger value="quality" className="gap-2"><ClipboardCheck className="h-4 w-4" /> 质量评分</TabsTrigger>
@@ -1496,6 +1677,178 @@ export default function Home() {
                   </Table>
                   </>
                 )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* 文献分类 Tab */}
+          <TabsContent value="classify">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>文献智能分类</CardTitle>
+                    <CardDescription>根据研究特征对文献进行分组，支持亚组分析和敏感性分析</CardDescription>
+                  </div>
+                  <Button onClick={() => setShowNewDimensionDialog(true)}>
+                    <Plus className="mr-2 h-4 w-4" /> 新建分类维度
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-6">
+                  {/* 分类维度选择 */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {classificationDimensions.map((dim) => (
+                      <Card 
+                        key={dim.id} 
+                        className={`cursor-pointer transition-all ${selectedDimension === dim.id ? 'ring-2 ring-blue-500' : ''}`}
+                        onClick={() => {
+                          setSelectedDimension(dim.id);
+                          loadClassificationResults(dim.id);
+                        }}
+                      >
+                        <CardContent className="p-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <h3 className="font-medium">{dim.name}</h3>
+                            <Button 
+                              variant="ghost" 
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteDimension(dim.id);
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4 text-slate-400 hover:text-red-500" />
+                            </Button>
+                          </div>
+                          {dim.description && (
+                            <p className="text-sm text-slate-500 mb-2">{dim.description}</p>
+                          )}
+                          <div className="flex flex-wrap gap-1">
+                            {(dim.categories as string[]).map((cat, idx) => (
+                              <Badge key={idx} variant="secondary" className="text-xs">{cat}</Badge>
+                            ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+
+                  {/* 分类操作区 */}
+                  {selectedDimension && (
+                    <div className="border rounded-lg p-4 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-medium">执行AI分类</h3>
+                        <div className="flex gap-2">
+                          <Button 
+                            onClick={classifyLiterature} 
+                            disabled={classifying || !apiKey}
+                          >
+                            {classifying ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                分类中...
+                              </>
+                            ) : (
+                              <>
+                                <Brain className="mr-2 h-4 w-4" />
+                                开始分类
+                              </>
+                            )}
+                          </Button>
+                          <Button variant="outline" onClick={exportByCategory}>
+                            <Download className="mr-2 h-4 w-4" />
+                            按分类导出
+                          </Button>
+                        </div>
+                      </div>
+                      {!apiKey && (
+                        <p className="text-sm text-amber-600">请先在设置中配置 DeepSeek API Key</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 分类结果 */}
+                  {classificationResults.length > 0 && (
+                    <div className="border rounded-lg">
+                      <div className="p-4 border-b bg-slate-50">
+                        <h3 className="font-medium">分类结果</h3>
+                      </div>
+                      <ScrollArea className="h-[400px]">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>文献</TableHead>
+                              <TableHead>分类</TableHead>
+                              <TableHead>置信度</TableHead>
+                              <TableHead>证据</TableHead>
+                              <TableHead>操作</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {classificationResults.map((result) => (
+                              <TableRow key={result.id}>
+                                <TableCell>
+                                  <div>
+                                    <div className="font-medium text-sm">{result.literature?.title}</div>
+                                    {result.literature?.authors && (
+                                      <div className="text-xs text-slate-500">
+                                        {result.literature.authors} ({result.literature.year || '未知年份'})
+                                      </div>
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant="secondary">{result.category}</Badge>
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-16 h-2 bg-slate-200 rounded-full overflow-hidden">
+                                      <div 
+                                        className={`h-full ${result.confidence >= 0.8 ? 'bg-green-500' : result.confidence >= 0.5 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                                        style={{ width: `${result.confidence * 100}%` }}
+                                      />
+                                    </div>
+                                    <span className="text-xs">{(result.confidence * 100).toFixed(0)}%</span>
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <p className="text-xs text-slate-600 max-w-xs truncate" title={result.evidence}>
+                                    {result.evidence || '-'}
+                                  </p>
+                                </TableCell>
+                                <TableCell>
+                                  <Button 
+                                    variant="ghost" 
+                                    size="sm"
+                                    onClick={() => exportSingleLiterature(result.literature_id)}
+                                  >
+                                    <Download className="h-4 w-4" />
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </ScrollArea>
+                    </div>
+                  )}
+
+                  {/* 空状态 */}
+                  {classificationDimensions.length === 0 && (
+                    <div className="text-center py-12">
+                      <Layers className="mx-auto h-12 w-12 text-slate-300 mb-4" />
+                      <p className="text-slate-500 mb-2">暂无分类维度</p>
+                      <p className="text-sm text-slate-400 mb-4">
+                        创建分类维度后，可对文献进行智能分组
+                      </p>
+                      <Button onClick={() => setShowNewDimensionDialog(true)}>
+                        <Plus className="mr-2 h-4 w-4" /> 新建分类维度
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
@@ -2208,6 +2561,60 @@ export default function Home() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* PDF关联选择对话框 */}
+      {/* 新建分类维度对话框 */}
+      <Dialog open={showNewDimensionDialog} onOpenChange={setShowNewDimensionDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>新建分类维度</DialogTitle>
+            <DialogDescription>
+              创建一个分类维度，用于对文献进行分组（如：按年龄分组、按移植方式分组等）
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="dim-name">维度名称 *</Label>
+              <Input
+                id="dim-name"
+                placeholder="如：年龄分组、移植方式"
+                value={newDimension.name}
+                onChange={(e) => setNewDimension({ ...newDimension, name: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label htmlFor="dim-desc">描述</Label>
+              <Input
+                id="dim-desc"
+                placeholder="如：按患者年龄进行亚组分析"
+                value={newDimension.description}
+                onChange={(e) => setNewDimension({ ...newDimension, description: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label htmlFor="dim-categories">分类选项 *（每行一个）</Label>
+              <Textarea
+                id="dim-categories"
+                placeholder={"< 35岁\n≥ 35岁\n未说明"}
+                value={newDimension.categories}
+                onChange={(e) => setNewDimension({ ...newDimension, categories: e.target.value })}
+                rows={4}
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                每行输入一个分类选项，AI将根据文献内容自动判断属于哪个分类
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setShowNewDimensionDialog(false)}>
+              取消
+            </Button>
+            <Button onClick={createDimension}>
+              创建
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 

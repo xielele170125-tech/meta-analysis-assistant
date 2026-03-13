@@ -1,0 +1,305 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { getSupabaseClient } from '@/storage/database/supabase-client';
+
+const client = getSupabaseClient();
+
+/**
+ * 获取所有分类维度
+ * GET /api/literature/classify
+ */
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const action = searchParams.get('action');
+
+    // 获取分类维度列表
+    if (action === 'dimensions') {
+      const { data, error } = await client
+        .from('classification_dimensions')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return NextResponse.json({ success: true, data });
+    }
+
+    // 获取文献分类结果
+    if (action === 'results') {
+      const dimensionId = searchParams.get('dimensionId');
+      
+      let query = client
+        .from('literature_classifications')
+        .select(`
+          *,
+          literature:literature_id(id, title, authors, year, doi),
+          dimension:dimension_id(id, name)
+        `);
+      
+      if (dimensionId) {
+        query = query.eq('dimension_id', dimensionId);
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+      return NextResponse.json({ success: true, data });
+    }
+
+    // 获取分类统计
+    if (action === 'stats') {
+      const { data: dimensions, error: dimError } = await client
+        .from('classification_dimensions')
+        .select('*');
+
+      if (dimError) throw dimError;
+
+      const stats = await Promise.all(
+        (dimensions || []).map(async (dim) => {
+          const { data: classifications, error } = await client
+            .from('literature_classifications')
+            .select('category, literature_id')
+            .eq('dimension_id', dim.id);
+
+          const categoryCounts: Record<string, number> = {};
+          (classifications || []).forEach((c) => {
+            const cat = c.category || '未分类';
+            categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+          });
+
+          return {
+            ...dim,
+            totalClassified: (classifications || []).length,
+            categoryCounts,
+          };
+        })
+      );
+
+      return NextResponse.json({ success: true, data: stats });
+    }
+
+    return NextResponse.json({ error: '无效的action参数' }, { status: 400 });
+  } catch (error) {
+    console.error('Classification GET error:', error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : '获取失败' },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * 创建分类维度或执行AI分类
+ * POST /api/literature/classify
+ */
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { action, apiKey } = body;
+
+    // 创建/更新分类维度
+    if (action === 'create_dimension') {
+      const { name, description, categories } = body;
+
+      const { data, error } = await client
+        .from('classification_dimensions')
+        .insert({ name, description, categories })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return NextResponse.json({ success: true, data });
+    }
+
+    // 删除分类维度
+    if (action === 'delete_dimension') {
+      const { dimensionId } = body;
+
+      const { error } = await client
+        .from('classification_dimensions')
+        .delete()
+        .eq('id', dimensionId);
+
+      if (error) throw error;
+      return NextResponse.json({ success: true });
+    }
+
+    // 执行AI分类
+    if (action === 'classify') {
+      const { dimensionId, literatureIds } = body;
+
+      if (!apiKey) {
+        return NextResponse.json({ error: '请提供API Key' }, { status: 400 });
+      }
+
+      // 获取分类维度
+      const { data: dimension, error: dimError } = await client
+        .from('classification_dimensions')
+        .select('*')
+        .eq('id', dimensionId)
+        .single();
+
+      if (dimError || !dimension) {
+        return NextResponse.json({ error: '分类维度不存在' }, { status: 404 });
+      }
+
+      // 获取待分类的文献
+      let query = client
+        .from('literature')
+        .select('id, title, abstract, raw_content, authors, year, doi')
+        .eq('status', 'completed');
+
+      if (literatureIds && literatureIds.length > 0) {
+        query = query.in('id', literatureIds);
+      }
+
+      const { data: literatureList, error: litError } = await query;
+
+      if (litError) throw litError;
+
+      // 逐个分类
+      const results = [];
+      for (const lit of literatureList || []) {
+        try {
+          // 使用标题、摘要或全文内容
+          const content = lit.raw_content || lit.abstract || '';
+          const title = lit.title || '';
+
+          if (!title && !content) {
+            console.log(`[Classify] Literature ${lit.id} has no content`);
+            continue;
+          }
+
+          // 调用AI进行分类
+          const classification = await classifyLiterature(
+            apiKey,
+            dimension,
+            title,
+            content,
+            lit.authors,
+            lit.year
+          );
+
+          // 保存分类结果
+          const { error: upsertError } = await client
+            .from('literature_classifications')
+            .upsert({
+              literature_id: lit.id,
+              dimension_id: dimensionId,
+              category: classification.category,
+              confidence: classification.confidence,
+              evidence: classification.evidence,
+            }, { onConflict: 'literature_id,dimension_id' });
+
+          if (upsertError) {
+            console.error(`[Classify] Error saving classification for ${lit.id}:`, upsertError);
+          }
+
+          results.push({
+            literatureId: lit.id,
+            title: lit.title,
+            category: classification.category,
+            confidence: classification.confidence,
+          });
+        } catch (err) {
+          console.error(`[Classify] Error classifying ${lit.id}:`, err);
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        data: {
+          total: literatureList?.length || 0,
+          classified: results.length,
+          results,
+        },
+      });
+    }
+
+    return NextResponse.json({ error: '无效的action参数' }, { status: 400 });
+  } catch (error) {
+    console.error('Classification POST error:', error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : '操作失败' },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * 使用AI对文献进行分类
+ */
+async function classifyLiterature(
+  apiKey: string,
+  dimension: { name: string; description?: string; categories: string[] },
+  title: string,
+  content: string,
+  authors?: string,
+  year?: number
+): Promise<{ category: string; confidence: number; evidence: string }> {
+  // 构建提示词
+  const systemPrompt = `你是一位专业的医学文献分析专家。你的任务是根据给定的分类维度，对文献进行分类。
+
+分类维度：${dimension.name}
+${dimension.description ? `描述：${dimension.description}` : ''}
+可选分类：${(dimension.categories as string[]).join('、')}
+
+请根据文献的标题、摘要或全文内容，判断该文献属于哪个分类。
+如果无法确定，选择"未说明"或最接近的分类。
+
+请以JSON格式返回：
+{
+  "category": "选择的分类",
+  "confidence": 0.0-1.0的置信度,
+  "evidence": "从文献中提取的支持该分类的证据文本（简要摘录）"
+}`;
+
+  const userPrompt = `请对以下文献进行分类：
+
+标题：${title}
+作者：${authors || '未知'}
+年份：${year || '未知'}
+
+内容摘要：
+${content.substring(0, 3000)}
+
+请返回JSON格式的分类结果。`;
+
+  const response = await fetch('https://api.deepseek.com/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: 'deepseek-chat',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature: 0.1,
+      response_format: { type: 'json_object' },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`DeepSeek API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const content_text = data.choices[0]?.message?.content || '{}';
+
+  try {
+    const result = JSON.parse(content_text);
+    return {
+      category: result.category || '未分类',
+      confidence: result.confidence || 0.5,
+      evidence: result.evidence || '',
+    };
+  } catch {
+    return {
+      category: '未分类',
+      confidence: 0,
+      evidence: '',
+    };
+  }
+}
