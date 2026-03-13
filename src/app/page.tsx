@@ -200,10 +200,11 @@ export default function Home() {
   // 文献检索相关状态
   const [researchQuestion, setResearchQuestion] = useState('');
   const [picoElements, setPicoElements] = useState<{
-    population: string[];
-    intervention: string[];
-    comparison: string[];
-    outcome: string[];
+    population?: { terms?: string[]; inferred?: boolean };
+    intervention?: { terms?: string[]; inferred?: boolean };
+    intervention_or_exposure?: { terms?: string[]; inferred?: boolean };
+    comparison?: { terms?: string[]; inferred?: boolean };
+    outcome?: { terms?: string[]; inferred?: boolean };
   } | null>(null);
   const [searchQueries, setSearchQueries] = useState<any>(null);
   const [pubmedResults, setPubmedResults] = useState<any[]>([]);
@@ -1806,34 +1807,84 @@ export default function Home() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div>
-                    <label className="text-sm font-medium mb-2 block">研究问题（PICO格式）</label>
+                    <label className="text-sm font-medium mb-2 block">研究问题（支持多种格式）</label>
                     <textarea
                       value={researchQuestion}
                       onChange={(e) => setResearchQuestion(e.target.value)}
-                      placeholder="例如：对于2型糖尿病患者，二甲双胍联合胰岛素治疗与单独胰岛素治疗相比，能否更好地控制血糖？"
-                      className="w-full min-h-[100px] p-3 border rounded-lg text-sm"
+                      placeholder="支持多种研究问题格式：&#10;&#10;• PICO格式：对于2型糖尿病患者，二甲双胍联合胰岛素治疗与单独胰岛素治疗相比，能否更好地控制血糖？&#10;&#10;• 宽泛问题：糖尿病患者的血糖控制策略研究&#10;&#10;• 观察性研究：吸烟与肺癌发病风险的关系&#10;&#10;系统会自动识别研究类型并推断相关要素"
+                      className="w-full min-h-[120px] p-3 border rounded-lg text-sm"
                     />
+                    <p className="text-xs text-slate-500 mt-1">
+                      提示：支持PICO（干预性）、PECO（观察性）、SPIDER（定性研究）等多种框架，系统会自动识别并推断相关要素
+                    </p>
                   </div>
                   
-                  {/* PICO要素 */}
+                  {/* 研究框架类型和要素 */}
                   {picoElements && (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
-                      <div className="p-3 bg-blue-50 rounded-lg">
-                        <div className="text-xs font-medium text-blue-600 mb-1">P - 人群</div>
-                        <div className="text-sm">{picoElements.population?.join(', ') || '-'}</div>
+                    <div className="space-y-3">
+                      {/* 框架类型说明 */}
+                      {searchQueries?.frameworkType && (
+                        <div className="flex items-center gap-2 p-2 bg-slate-100 rounded-lg">
+                          <Badge variant="outline" className="bg-white">
+                            {searchQueries.frameworkType === 'PICO' ? '🔬 干预性研究' :
+                             searchQueries.frameworkType === 'PECO' ? '👁️ 观察性研究' :
+                             searchQueries.frameworkType === 'SPIDER' ? '📝 定性研究' :
+                             '📚 综合检索'}
+                          </Badge>
+                          <span className="text-sm text-slate-600">
+                            {searchQueries.frameworkDescription || '系统自动识别的研究类型'}
+                          </span>
+                        </div>
+                      )}
+                      
+                      {/* 要素展示 */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="p-3 bg-blue-50 rounded-lg">
+                          <div className="text-xs font-medium text-blue-600 mb-1">
+                            P - 人群
+                            {picoElements.population?.inferred && <span className="text-blue-400 ml-1">(推断)</span>}
+                          </div>
+                          <div className="text-sm">{picoElements.population?.terms?.join(', ') || '-'}</div>
+                        </div>
+                        <div className="p-3 bg-green-50 rounded-lg">
+                          <div className="text-xs font-medium text-green-600 mb-1">
+                            I/E - 干预/暴露
+                            {picoElements.intervention_or_exposure?.inferred && <span className="text-green-400 ml-1">(推断)</span>}
+                          </div>
+                          <div className="text-sm">{picoElements.intervention_or_exposure?.terms?.join(', ') || '-'}</div>
+                        </div>
+                        <div className="p-3 bg-orange-50 rounded-lg">
+                          <div className="text-xs font-medium text-orange-600 mb-1">
+                            C - 对照
+                            {picoElements.comparison?.inferred && <span className="text-orange-400 ml-1">(推断)</span>}
+                          </div>
+                          <div className="text-sm">{picoElements.comparison?.terms?.join(', ') || '-'}</div>
+                        </div>
+                        <div className="p-3 bg-purple-50 rounded-lg">
+                          <div className="text-xs font-medium text-purple-600 mb-1">
+                            O - 结局
+                            {picoElements.outcome?.inferred && <span className="text-purple-400 ml-1">(推断)</span>}
+                          </div>
+                          <div className="text-sm">{picoElements.outcome?.terms?.join(', ') || '-'}</div>
+                        </div>
                       </div>
-                      <div className="p-3 bg-green-50 rounded-lg">
-                        <div className="text-xs font-medium text-green-600 mb-1">I - 干预</div>
-                        <div className="text-sm">{picoElements.intervention?.join(', ') || '-'}</div>
-                      </div>
-                      <div className="p-3 bg-orange-50 rounded-lg">
-                        <div className="text-xs font-medium text-orange-600 mb-1">C - 对照</div>
-                        <div className="text-sm">{picoElements.comparison?.join(', ') || '-'}</div>
-                      </div>
-                      <div className="p-3 bg-purple-50 rounded-lg">
-                        <div className="text-xs font-medium text-purple-600 mb-1">O - 结局</div>
-                        <div className="text-sm">{picoElements.outcome?.join(', ') || '-'}</div>
-                      </div>
+                      
+                      {/* 扩展概念 */}
+                      {searchQueries?.conceptAnalysis?.expandedTerms && (
+                        <div className="p-3 bg-slate-50 rounded-lg">
+                          <div className="text-xs font-medium text-slate-600 mb-2">概念扩展</div>
+                          <div className="flex flex-wrap gap-2">
+                            {Object.entries(searchQueries.conceptAnalysis.expandedTerms).map(([concept, terms]: [string, any]) => (
+                              <div key={concept} className="text-xs">
+                                <span className="font-medium text-slate-600">{concept}:</span>
+                                <span className="text-slate-500 ml-1">
+                                  {Array.isArray(terms) ? terms.slice(0, 5).join(', ') : terms}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                   
@@ -1846,7 +1897,7 @@ export default function Home() {
                         }
                         setGeneratingQuery(true);
                         try {
-                          // 先解析PICO
+                          // 先解析研究要素
                           const picoRes = await fetch('/api/literature/search-query/generate', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
@@ -1857,12 +1908,7 @@ export default function Home() {
                           });
                           const picoData = await picoRes.json();
                           if (picoData.success) {
-                            setPicoElements({
-                              population: picoData.data.pico?.population?.terms || [],
-                              intervention: picoData.data.pico?.intervention?.terms || [],
-                              comparison: picoData.data.pico?.comparison?.terms || [],
-                              outcome: picoData.data.pico?.outcome?.terms || [],
-                            });
+                            setPicoElements(picoData.data.elements || picoData.data.pico);
                           }
                           
                           // 然后生成检索式
@@ -1872,7 +1918,7 @@ export default function Home() {
                             body: JSON.stringify({
                               action: 'generate',
                               researchQuestion,
-                              pico: picoData.data?.pico,
+                              pico: picoData.data?.elements || picoData.data?.pico,
                             }),
                           });
                           const queryData = await queryRes.json();
@@ -1891,12 +1937,12 @@ export default function Home() {
                       {generatingQuery ? (
                         <>
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          生成中...
+                          分析并生成中...
                         </>
                       ) : (
                         <>
                           <Brain className="mr-2 h-4 w-4" />
-                          生成检索式
+                          智能生成检索式
                         </>
                       )}
                     </Button>
@@ -2006,17 +2052,52 @@ export default function Home() {
                                 ))}
                               </div>
                             </div>
+                            
+                            {searchQueries.queries[db]?.estimatedResults && (
+                              <div className="text-sm text-slate-500">
+                                <span className="font-medium">预估结果：</span>
+                                {searchQueries.queries[db].estimatedResults}
+                              </div>
+                            )}
                           </div>
                         </TabsContent>
                       ))}
                     </Tabs>
                     
-                    {searchQueries.strategy && (
-                      <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-                        <div className="text-sm font-medium text-blue-700 mb-1">检索策略说明</div>
-                        <div className="text-sm text-blue-600">{searchQueries.strategy}</div>
-                      </div>
-                    )}
+                    {/* 检索策略说明 */}
+                    <div className="mt-4 space-y-3">
+                      {searchQueries.strategy && (
+                        <div className="p-3 bg-blue-50 rounded-lg">
+                          <div className="text-sm font-medium text-blue-700 mb-1">检索策略说明</div>
+                          <div className="text-sm text-blue-600">{searchQueries.strategy}</div>
+                        </div>
+                      )}
+                      
+                      {searchQueries.sensitivityNotes && (
+                        <div className="p-3 bg-green-50 rounded-lg">
+                          <div className="text-sm font-medium text-green-700 mb-1">敏感性说明</div>
+                          <div className="text-sm text-green-600">{searchQueries.sensitivityNotes}</div>
+                        </div>
+                      )}
+                      
+                      {searchQueries.precisionNotes && (
+                        <div className="p-3 bg-orange-50 rounded-lg">
+                          <div className="text-sm font-medium text-orange-700 mb-1">精确性说明</div>
+                          <div className="text-sm text-orange-600">{searchQueries.precisionNotes}</div>
+                        </div>
+                      )}
+                      
+                      {searchQueries.suggestions && searchQueries.suggestions.length > 0 && (
+                        <div className="p-3 bg-slate-50 rounded-lg">
+                          <div className="text-sm font-medium text-slate-700 mb-1">优化建议</div>
+                          <ul className="text-sm text-slate-600 list-disc list-inside">
+                            {searchQueries.suggestions.map((s: string, i: number) => (
+                              <li key={i}>{s}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
                   </CardContent>
                 </Card>
               )}
