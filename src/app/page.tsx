@@ -246,6 +246,8 @@ export default function Home() {
     categories: string[];
     totalClassified?: number;
     categoryCounts?: Record<string, number>;
+    dataAvailability?: string;
+    contrastValue?: string;
   }>>([]);
   const [selectedDimension, setSelectedDimension] = useState<string | null>(null);
   const [classificationResults, setClassificationResults] = useState<Array<{
@@ -375,7 +377,39 @@ export default function Home() {
       // 使用 stats API 获取带统计的分类维度
       const res = await fetch('/api/literature/classify?action=stats');
       const data = await res.json();
-      if (data.success) setClassificationDimensions(data.data);
+      if (data.success) {
+        // 解析 description 中的额外字段
+        const parsedDimensions = (data.data || []).map((dim: any) => {
+          let dataAvailability = '';
+          let contrastValue = '';
+          let cleanDescription = dim.description || '';
+          
+          // 解析格式: 【dataAvailability】contrastValue \n 原描述
+          if (dim.description) {
+            const match = dim.description.match(/【(.+?)】(.+?)(?:\n|$)/);
+            if (match) {
+              dataAvailability = match[1];
+              contrastValue = match[2];
+              cleanDescription = dim.description.replace(/【.+?】.+\n?/, '').trim();
+            } else if (dim.description.startsWith('【')) {
+              // 只有 dataAvailability
+              const simpleMatch = dim.description.match(/【(.+?)】/);
+              if (simpleMatch) {
+                dataAvailability = simpleMatch[1];
+                cleanDescription = dim.description.replace(/【.+?】\s*/, '').trim();
+              }
+            }
+          }
+          
+          return {
+            ...dim,
+            description: cleanDescription,
+            dataAvailability,
+            contrastValue,
+          };
+        });
+        setClassificationDimensions(parsedDimensions);
+      }
     } catch (error) {
       console.error('Load dimensions error:', error);
     }
@@ -548,6 +582,8 @@ export default function Home() {
     categories: string[];
     rationale: string;
     literatureCount: number;
+    dataAvailability?: string;
+    contrastValue?: string;
   }>>([]);
   const [showRecommendDialog, setShowRecommendDialog] = useState(false);
 
@@ -1966,11 +2002,20 @@ export default function Home() {
                   </div>
 
                   {/* 分类维度选择 */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {classificationDimensions.map((dim) => (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {classificationDimensions.map((dim) => {
+                      const hasEnoughData = (dim.totalClassified || 0) >= 2;
+                      const validCategories = (dim.categories as string[]).filter(
+                        cat => (dim.categoryCounts?.[cat] || 0) >= 2
+                      );
+                      const isValidForMeta = validCategories.length >= 2;
+                      
+                      return (
                       <Card 
                         key={dim.id} 
-                        className={`cursor-pointer transition-all ${selectedDimension === dim.id ? 'ring-2 ring-blue-500' : ''}`}
+                        className={`cursor-pointer transition-all ${
+                          selectedDimension === dim.id ? 'ring-2 ring-blue-500' : ''
+                        } ${isValidForMeta ? 'border-green-200' : ''}`}
                         onClick={() => {
                           setSelectedDimension(dim.id);
                           loadClassificationResults(dim.id);
@@ -1978,7 +2023,14 @@ export default function Home() {
                       >
                         <CardContent className="p-4">
                           <div className="flex items-center justify-between mb-2">
-                            <h3 className="font-medium">{dim.name}</h3>
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-medium">{dim.name}</h3>
+                              {isValidForMeta && (
+                                <Badge variant="default" className="bg-green-500 text-xs">
+                                  可用于Meta
+                                </Badge>
+                              )}
+                            </div>
                             <div className="flex items-center gap-2">
                               {dim.totalClassified && dim.totalClassified > 0 && (
                                 <Badge variant="outline" className="text-xs">
@@ -1997,17 +2049,41 @@ export default function Home() {
                               </Button>
                             </div>
                           </div>
+                          
+                          {/* 数据可获得性标识 */}
+                          {dim.dataAvailability && (
+                            <div className={`text-xs mb-2 px-2 py-1 rounded ${
+                              dim.dataAvailability === '有明确数据' 
+                                ? 'bg-green-100 text-green-700' 
+                                : dim.dataAvailability === '可能有数据'
+                                ? 'bg-amber-100 text-amber-700'
+                                : 'bg-slate-100 text-slate-600'
+                            }`}>
+                              📊 {dim.dataAvailability}
+                            </div>
+                          )}
+                          
                           {dim.description && (
                             <p className="text-sm text-slate-500 mb-2">{dim.description}</p>
                           )}
+                          
+                          {/* 对照价值说明 */}
+                          {dim.contrastValue && (
+                            <p className="text-xs text-blue-600 mb-2 italic">
+                              💡 {dim.contrastValue}
+                            </p>
+                          )}
+                          
+                          {/* 分类标签 */}
                           <div className="flex flex-wrap gap-1">
                             {(dim.categories as string[]).map((cat, idx) => {
                               const count = dim.categoryCounts?.[cat] || 0;
+                              const hasEnough = count >= 2;
                               return (
                                 <Badge 
                                   key={idx} 
-                                  variant={count > 0 ? "default" : "secondary"} 
-                                  className="text-xs"
+                                  variant={hasEnough ? "default" : count > 0 ? "secondary" : "outline"} 
+                                  className={`text-xs ${hasEnough ? 'bg-green-500' : ''}`}
                                 >
                                   {cat} {count > 0 && `(${count})`}
                                 </Badge>
@@ -2016,7 +2092,8 @@ export default function Home() {
                           </div>
                         </CardContent>
                       </Card>
-                    ))}
+                      );
+                    })}
                   </div>
 
                   {/* 分类操作区 */}
@@ -3241,17 +3318,57 @@ export default function Home() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            {recommendedDimensions.map((dim, idx) => (
-              <div key={idx} className="border rounded-lg p-4 hover:bg-slate-50 dark:hover:bg-slate-800">
+            {recommendedDimensions.map((dim, idx) => {
+              const hasEnoughCategories = dim.categories.length >= 2;
+              return (
+              <div key={idx} className={`border rounded-lg p-4 ${
+                hasEnoughCategories && dim.dataAvailability !== '信息不足'
+                  ? 'border-green-200 bg-green-50/30' 
+                  : ''
+              }`}>
                 <div className="flex items-start justify-between mb-2">
-                  <h4 className="font-medium">{dim.name}</h4>
-                  <Badge variant="secondary">
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-medium">{dim.name}</h4>
+                    {hasEnoughCategories && dim.dataAvailability === '有明确数据' && (
+                      <Badge variant="default" className="bg-green-500 text-xs">
+                        ✓ 有数据
+                      </Badge>
+                    )}
+                    {dim.dataAvailability === '可能有数据' && (
+                      <Badge variant="secondary" className="text-xs">
+                        ? 可能有数据
+                      </Badge>
+                    )}
+                  </div>
+                  <Badge variant="outline">
                     约 {dim.literatureCount} 篇可分类
                   </Badge>
                 </div>
+                
+                {/* 数据可获得性 */}
+                {dim.dataAvailability && (
+                  <div className={`text-xs mb-2 px-2 py-1 rounded inline-block ${
+                    dim.dataAvailability === '有明确数据' 
+                      ? 'bg-green-100 text-green-700' 
+                      : dim.dataAvailability === '可能有数据'
+                      ? 'bg-amber-100 text-amber-700'
+                      : 'bg-slate-100 text-slate-600'
+                  }`}>
+                    📊 数据：{dim.dataAvailability}
+                  </div>
+                )}
+                
                 <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">
                   {dim.description}
                 </p>
+                
+                {/* 对照价值 */}
+                {dim.contrastValue && (
+                  <p className="text-xs text-blue-600 mb-2 bg-blue-50 px-2 py-1 rounded">
+                    💡 对照价值：{dim.contrastValue}
+                  </p>
+                )}
+                
                 <div className="flex flex-wrap gap-1 mb-2">
                   {dim.categories.map((cat, catIdx) => (
                     <Badge key={catIdx} variant="outline" className="text-xs">
@@ -3263,7 +3380,8 @@ export default function Home() {
                   <strong>推荐理由：</strong>{dim.rationale}
                 </p>
               </div>
-            ))}
+              );
+            })}
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setShowRecommendDialog(false)}>

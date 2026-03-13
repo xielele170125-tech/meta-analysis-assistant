@@ -315,18 +315,28 @@ export async function POST(request: NextRequest) {
 
       const createdDimensions = [];
       for (const dim of dimensions) {
+        // 保存新字段到 description 中（因为数据库没有这些列）
+        // 格式: [dataAvailability] contrastValue \n 原描述
+        const enhancedDescription = dim.dataAvailability || dim.contrastValue
+          ? `${dim.dataAvailability ? `【${dim.dataAvailability}】` : ''}${dim.contrastValue || ''}${dim.description ? `\n${dim.description}` : ''}`
+          : dim.description;
+        
         const { data, error } = await client
           .from('classification_dimensions')
           .insert({
             name: dim.name,
-            description: dim.description,
+            description: enhancedDescription,
             categories: dim.categories,
           })
           .select()
           .single();
 
         if (!error && data) {
-          createdDimensions.push(data);
+          createdDimensions.push({
+            ...data,
+            dataAvailability: dim.dataAvailability,
+            contrastValue: dim.contrastValue,
+          });
         }
       }
 
@@ -477,41 +487,75 @@ async function recommendDimensions(
     })
     .join('\n\n');
 
-  const systemPrompt = `你是一位专业的医学Meta分析专家。你的任务是根据研究问题和文献内容，推荐适合进行亚组分析或敏感性分析的分类维度。
+  const systemPrompt = `你是一位专业的医学Meta分析专家。你的任务是深入分析文献，识别 ALL 可能的分类维度，特别是能构成对照关系且有数据支持的维度。
 
-## 你的任务
-1. 分析研究问题，识别可能影响研究结果的关键因素
-2. 从文献中提取这些因素的不同取值/类别
-3. 推荐有意义的分类维度，用于亚组分析
+## 核心任务：识别对照维度
+你需要找出所有可以进行亚组分析或Meta分析的对照维度。一个好的分类维度应该：
+1. **构成对照关系**：至少有两个可以比较的组别
+2. **有数据支持**：文献中报告了相关数据，或者从研究设计推断可能报告数据
+3. **临床意义**：该对照在临床或流行病学上有比较价值
 
-## 分类维度的选择原则
-1. 临床意义：该因素在临床上可能影响治疗效果或结局
-2. 可操作性：文献中通常会报告该因素的信息
-3. 异质性来源：该因素可能是导致研究间异质性的原因
-4. 常见维度示例：
-   - 人群特征：年龄、性别、疾病分期、严重程度
-   - 干预特征：药物剂量、给药方式、治疗周期
-   - 研究设计：RCT vs 观察性研究、单中心 vs 多中心
-   - 地域/种族：亚洲人群 vs 西方人群
+## 必须识别的维度类型（穷尽式搜索）
+
+### 1. 疾病/人群特征对照
+- 疾病类型：如 PCOS vs 子宫内膜异位症 vs 健康对照
+- 疾病分期/严重程度：轻度 vs 中度 vs 重度
+- 年龄分组：老年 vs 中年 vs 青年（注意具体的年龄界限）
+- 性别：男性 vs 女性
+- 种族/地区：亚洲人群 vs 欧美人群
+- 合并症：有合并症 vs 无合并症
+
+### 2. 干预/暴露因素对照
+- 治疗方案：药物A vs 药物B vs 安慰剂
+- 剂量：高剂量 vs 低剂量
+- 给药方式：口服 vs 静脉 vs 局部
+- 治疗周期：短期 vs 长期
+- 手术方式：腹腔镜 vs 开腹
+
+### 3. 结局指标类型
+- 主要结局 vs 次要结局
+- 短期结局 vs 长期结局
+- 客观指标 vs 主观指标
+
+### 4. 研究设计特征
+- 研究类型：RCT vs 队列研究 vs 病例对照
+- 样本量：大样本(>200) vs 中样本(50-200) vs 小样本(<50)
+- 随访时间：长期(>5年) vs 中期(1-5年) vs 短期(<1年)
+- 研究质量：高质量 vs 中等质量 vs 低质量
+
+### 5. 特殊人群对照
+- 妊娠相关：妊娠期 vs 非妊娠期
+- 儿童vs成人vs老年
+- 初治患者 vs 复治患者
+
+## 数据支持识别
+对于每个维度，请判断：
+- **有明确数据**：摘要中明确报告了各组的具体数值（如样本量、发生率、均值等）
+- **可能有数据**：标题或摘要提及了该因素，但未给出具体数值（全文可能有）
+- **信息不足**：无法从标题摘要判断
 
 ## 输出格式
-请以JSON格式返回推荐的分类维度列表（最多5个）：
+请以JSON格式返回推荐的分类维度列表（尽可能全面，不要遗漏）：
 {
   "dimensions": [
     {
-      "name": "维度名称（简洁）",
-      "description": "维度描述（说明为什么这个维度重要）",
-      "categories": ["分类1", "分类2", "未说明/未知"],
-      "rationale": "推荐理由（基于研究问题和文献内容）",
-      "literatureCount": 估计有多少篇文献可以据此分类
+      "name": "维度名称（简洁，如'疾病类型'）",
+      "description": "维度描述（说明该维度的临床意义和对照价值）",
+      "categories": ["分类1", "分类2", "其他/未说明"],
+      "rationale": "推荐理由（说明为什么这个维度适合做Meta分析对照）",
+      "dataAvailability": "有明确数据/可能有数据/信息不足",
+      "literatureCount": 估计有多少篇文献可以据此分类,
+      "contrastValue": "说明这个维度的对照价值，如'可比较不同疾病状态对结局的影响'"
     }
   ]
 }
 
-注意：
-- 每个维度必须有明确的分类选项，通常2-4个类别
-- 类别应互斥且覆盖主要情况
-- 建议包含"未说明"或"未知"类别以处理信息缺失`;
+## 重要提醒
+1. 宁多勿少：宁可多推荐几个维度，也不要遗漏有价值的对照维度
+2. 聚焦对照：每个维度至少要有2个可以比较的类别才有Meta分析价值
+3. 标注数据：清晰标注每个维度的数据可获得性
+4. 具体明确：分类名称要具体，如"PCOS vs 子宫内膜异位症"而不是"疾病类型"`;
+
 
   const userPrompt = `## 研究问题
 ${researchQuestion}
@@ -519,7 +563,27 @@ ${researchQuestion}
 ## 待分析的文献（共${literatureList.length}篇，以下为前${Math.min(30, literatureList.length)}篇摘要）
 ${literatureSummaries}
 
-请根据研究问题和文献内容，推荐适合的分类维度。`;
+## 请执行以下分析任务：
+
+### 第一步：识别所有可能的对照维度
+请仔细阅读每篇文献的标题、摘要，识别：
+1. 研究涉及的人群/疾病类型（如PCOS、子宫内膜异位症、健康对照等）
+2. 比较的干预措施或暴露因素
+3. 报告的结局指标及其类型
+4. 研究设计特征
+
+### 第二步：评估数据可获得性
+对于每个识别出的维度：
+- 标注是否有明确的数值数据（样本量、发生率、均值等）
+- 标注是否可能从全文中获得数据
+
+### 第三步：推荐分类维度
+推荐所有可以进行Meta分析亚组比较的分类维度，确保：
+1. 每个维度至少有2个可比较的类别
+2. 优先推荐有明确数据的维度
+3. 也推荐可能有数据的维度（用于后续全文提取）
+
+请返回JSON格式的推荐结果。`;
 
   const response = await fetch('https://api.deepseek.com/chat/completions', {
     method: 'POST',
