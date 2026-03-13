@@ -32,7 +32,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet, Code2, TriangleAlert, TrendingUp, Search, GitCompare, Info, RefreshCw, ClipboardCheck, Star, AlertTriangle, CheckCircle2, Layers, FolderTree, Plus, X, Lightbulb, Sparkles } from 'lucide-react';
+import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet, Code2, TriangleAlert, TrendingUp, Search, GitCompare, Info, RefreshCw, ClipboardCheck, Star, AlertTriangle, CheckCircle2, Layers, FolderTree, Plus, X, Lightbulb, Sparkles, Clipboard, FileDigit } from 'lucide-react';
 import QualityAssessmentTable from '@/components/QualityAssessmentTable';
 
 // 类型定义
@@ -257,6 +257,13 @@ export default function Home() {
   const [classifying, setClassifying] = useState(false);
   const [showNewDimensionDialog, setShowNewDimensionDialog] = useState(false);
   const [newDimension, setNewDimension] = useState({ name: '', description: '', categories: '' });
+  
+  // 粘贴导入相关状态
+  const [showPasteDialog, setShowPasteDialog] = useState(false);
+  const [pasteContent, setPasteContent] = useState('');
+  const [pasteType, setPasteType] = useState<'auto' | 'pdf' | 'ris' | 'xml'>('auto');
+  const [pasting, setPasting] = useState(false);
+  const [pasteResult, setPasteResult] = useState<{ total: number; imported: number; message: string } | null>(null);
   
   // 质量评分相关状态
   const [qualityAssessments, setQualityAssessments] = useState<QualityAssessment[]>([]);
@@ -591,6 +598,110 @@ export default function Home() {
     }
   };
 
+  // 粘贴导入文献
+  const handlePasteImport = async () => {
+    if (!pasteContent.trim()) {
+      alert('请粘贴内容');
+      return;
+    }
+
+    setPasting(true);
+    setPasteResult(null);
+
+    try {
+      const res = await fetch('/api/literature/paste', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contentType: pasteType,
+          content: pasteContent,
+          apiKey,
+          autoProcess: true,
+        }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        setPasteResult({
+          total: data.data.total || 1,
+          imported: data.data.imported || 1,
+          message: data.data.message || `成功导入 ${data.data.imported || 1} 篇文献`,
+        });
+        // 刷新文献列表
+        loadLiterature();
+      } else {
+        alert('导入失败: ' + data.error);
+      }
+    } catch (error) {
+      console.error('Paste import error:', error);
+      alert('导入失败');
+    } finally {
+      setPasting(false);
+    }
+  };
+
+  // 处理文件拖拽/粘贴
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      const file = files[0];
+      if (file.type === 'application/pdf') {
+        // 读取PDF文件
+        const reader = new FileReader();
+        reader.onload = async () => {
+          const base64 = (reader.result as string).split(',')[1];
+          setPasteContent(base64);
+          setPasteType('pdf');
+          setShowPasteDialog(true);
+        };
+        reader.readAsDataURL(file);
+      } else {
+        // 读取文本文件
+        const text = await file.text();
+        setPasteContent(text);
+        setPasteType('auto');
+        setShowPasteDialog(true);
+      }
+    }
+  };
+
+  // 处理剪贴板粘贴
+  const handleClipboardPaste = async () => {
+    try {
+      // 尝试读取剪贴板中的文件
+      const clipboardItems = await navigator.clipboard.read();
+      
+      for (const item of clipboardItems) {
+        // 检查是否有PDF文件
+        if (item.types.includes('application/pdf')) {
+          const blob = await item.getType('application/pdf');
+          const reader = new FileReader();
+          reader.onload = async () => {
+            const base64 = (reader.result as string).split(',')[1];
+            setPasteContent(base64);
+            setPasteType('pdf');
+          };
+          reader.readAsDataURL(blob);
+          setShowPasteDialog(true);
+          return;
+        }
+        
+        // 检查是否有文本
+        if (item.types.includes('text/plain')) {
+          const blob = await item.getType('text/plain');
+          const text = await blob.text();
+          setPasteContent(text);
+          setPasteType('auto');
+          setShowPasteDialog(true);
+          return;
+        }
+      }
+    } catch (error) {
+      // 如果剪贴板API失败，打开对话框让用户手动粘贴
+      setShowPasteDialog(true);
+    }
+  };
   const loadQualityAssessments = useCallback(async () => {
     try {
       const res = await fetch('/api/quality-assessment');
@@ -1511,6 +1622,14 @@ export default function Home() {
                     >
                       {importing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
                       {importing ? '导入中...' : '导入EndNote'}
+                    </Button>
+                    {/* 粘贴导入按钮 */}
+                    <Button 
+                      variant="outline"
+                      onClick={() => setShowPasteDialog(true)}
+                    >
+                      <Clipboard className="mr-2 h-4 w-4" />
+                      粘贴导入
                     </Button>
                     {/* 关联PDF到已有文献 - 支持多选，自动匹配 */}
                     <input type="file" id="attach-pdf" className="hidden" accept=".pdf" onChange={handleAttachPdf} disabled={attachingPdf} multiple />
@@ -2687,6 +2806,116 @@ export default function Home() {
       </Dialog>
 
       {/* PDF关联选择对话框 */}
+      {/* 粘贴导入对话框 */}
+      <Dialog open={showPasteDialog} onOpenChange={setShowPasteDialog}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Clipboard className="h-5 w-5" />
+              粘贴导入文献
+            </DialogTitle>
+            <DialogDescription>
+              粘贴PDF文件内容或EndNote格式文本，自动识别并导入
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {/* 内容类型选择 */}
+            <div className="flex gap-2">
+              <Button 
+                variant={pasteType === 'auto' ? 'default' : 'outline'} 
+                size="sm"
+                onClick={() => setPasteType('auto')}
+              >
+                自动检测
+              </Button>
+              <Button 
+                variant={pasteType === 'ris' ? 'default' : 'outline'} 
+                size="sm"
+                onClick={() => setPasteType('ris')}
+              >
+                RIS格式
+              </Button>
+              <Button 
+                variant={pasteType === 'xml' ? 'default' : 'outline'} 
+                size="sm"
+                onClick={() => setPasteType('xml')}
+              >
+                XML格式
+              </Button>
+              <Button 
+                variant={pasteType === 'pdf' ? 'default' : 'outline'} 
+                size="sm"
+                onClick={() => setPasteType('pdf')}
+              >
+                PDF (Base64)
+              </Button>
+            </div>
+
+            {/* 粘贴区域 */}
+            <div className="space-y-2">
+              <Label>粘贴内容</Label>
+              <Textarea
+                placeholder={
+                  pasteType === 'pdf' 
+                    ? '粘贴PDF文件的Base64编码内容...' 
+                    : pasteType === 'ris'
+                    ? '粘贴RIS格式内容，例如：\nTY  - JOUR\nTI  - 文章标题\nAU  - 作者\n...'
+                    : pasteType === 'xml'
+                    ? '粘贴EndNote XML格式内容...'
+                    : '粘贴内容，系统将自动识别格式...\n\n支持：\n• RIS格式 (TY  - JOUR...)\n• EndNote XML格式 (<xml>...)</xml>\n• PDF Base64编码'
+                }
+                value={pasteContent}
+                onChange={(e) => setPasteContent(e.target.value)}
+                rows={12}
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-slate-500">
+                {pasteType === 'pdf' 
+                  ? '提示：可以打开PDF文件，全选复制内容后粘贴到这里' 
+                  : '提示：可以从EndNote导出RIS或XML格式，复制内容粘贴到这里'}
+              </p>
+            </div>
+
+            {/* 导入结果 */}
+            {pasteResult && (
+              <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
+                <div className="flex items-center gap-2 text-green-700 dark:text-green-300">
+                  <CheckCircle className="h-5 w-5" />
+                  <span className="font-medium">{pasteResult.message}</span>
+                </div>
+                {pasteResult.total > 1 && (
+                  <p className="text-sm text-green-600 dark:text-green-400 mt-1">
+                    共处理 {pasteResult.total} 条记录，成功导入 {pasteResult.imported} 条
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => {
+              setShowPasteDialog(false);
+              setPasteContent('');
+              setPasteResult(null);
+            }}>
+              关闭
+            </Button>
+            <Button onClick={handlePasteImport} disabled={pasting || !pasteContent.trim()}>
+              {pasting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  导入中...
+                </>
+              ) : (
+                <>
+                  <Upload className="mr-2 h-4 w-4" />
+                  开始导入
+                </>
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* AI推荐维度对话框 */}
       <Dialog open={showRecommendDialog} onOpenChange={setShowRecommendDialog}>
         <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
