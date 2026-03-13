@@ -33,8 +33,9 @@ import {
 } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet, Code2, TriangleAlert, TrendingUp, Search, GitCompare, Info, RefreshCw, ClipboardCheck, Star, AlertTriangle, CheckCircle2, Layers, FolderTree, Plus, X, Lightbulb, Sparkles, Clipboard, FileDigit, ChevronDown, Play } from 'lucide-react';
+import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet, Code2, TriangleAlert, TrendingUp, Search, GitCompare, Info, RefreshCw, ClipboardCheck, Star, AlertTriangle, CheckCircle2, Layers, FolderTree, Plus, X, Lightbulb, Sparkles, Clipboard, FileDigit, ChevronDown, Play, Network } from 'lucide-react';
 import QualityAssessmentTable from '@/components/QualityAssessmentTable';
+import NetworkAnalysisTab from '@/components/NetworkAnalysisTab';
 
 // 类型定义
 interface Literature {
@@ -1742,13 +1743,14 @@ export default function Home() {
         )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-6 mb-6">
+          <TabsList className="grid w-full grid-cols-7 mb-6">
             <TabsTrigger value="literature" className="gap-2"><Upload className="h-4 w-4" /> 文献管理</TabsTrigger>
             <TabsTrigger value="classify" className="gap-2"><Layers className="h-4 w-4" /> 文献分类</TabsTrigger>
             <TabsTrigger value="data" className="gap-2"><Database className="h-4 w-4" /> 数据提取</TabsTrigger>
             <TabsTrigger value="compare" className="gap-2"><Search className="h-4 w-4" /> 数据对比</TabsTrigger>
             <TabsTrigger value="quality" className="gap-2"><ClipboardCheck className="h-4 w-4" /> 质量评分</TabsTrigger>
             <TabsTrigger value="analysis" className="gap-2"><BarChart3 className="h-4 w-4" /> Meta分析</TabsTrigger>
+            <TabsTrigger value="network" className="gap-2"><Network className="h-4 w-4" /> 网状分析</TabsTrigger>
           </TabsList>
 
           <TabsContent value="literature">
@@ -3172,6 +3174,14 @@ export default function Home() {
                 ))
               )}
             </div>
+          </TabsContent>
+
+          {/* 网状Meta分析 */}
+          <TabsContent value="network">
+            <NetworkAnalysisTab 
+              apiKey={apiKey} 
+              extractedStudies={extractedStudies}
+            />
           </TabsContent>
         </Tabs>
       </main>

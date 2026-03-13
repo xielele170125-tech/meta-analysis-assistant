@@ -251,6 +251,284 @@ export const literatureClassifications = pgTable(
   ]
 );
 
+// ==================== 网状Meta分析相关表 ====================
+
+// 干预措施表
+export const interventions = pgTable(
+  "interventions",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    // 干预措施名称
+    name: varchar("name", { length: 255 }).notNull(),
+    // 标准化名称（用于合并同类干预）
+    standardizedName: varchar("standardized_name", { length: 255 }),
+    // 干预类型: drug, procedure, behavior, control, etc.
+    interventionType: varchar("intervention_type", { length: 50 }),
+    // 描述
+    description: text("description"),
+    // 别名（JSON数组）
+    aliases: jsonb("aliases").$type<string[]>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("interventions_name_idx").on(table.name),
+    index("interventions_standardized_idx").on(table.standardizedName),
+  ]
+);
+
+// 网状分析项目表
+export const networkMetaAnalysis = pgTable(
+  "network_meta_analysis",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    name: varchar("name", { length: 255 }).notNull(),
+    description: text("description"),
+    // 结局类型: continuous, binary, time_to_event
+    outcomeType: varchar("outcome_type", { length: 20 }).default("binary").notNull(),
+    // 效应量指标: OR, RR, RD, MD, SMD, HR
+    effectMeasure: varchar("effect_measure", { length: 20 }).default("OR").notNull(),
+    // 模型类型: fixed, random
+    modelType: varchar("model_type", { length: 20 }).default("random").notNull(),
+    // 分析方法: bucher (频率学派), bayesian (贝叶斯)
+    analysisMethod: varchar("analysis_method", { length: 20 }).default("bucher").notNull(),
+    // 状态: draft, running, completed, failed
+    status: varchar("status", { length: 20 }).default("draft").notNull(),
+    // 参照干预（用于计算效应量）
+    referenceIntervention: varchar("reference_intervention", { length: 255 }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("network_meta_status_idx").on(table.status),
+  ]
+);
+
+// 多臂试验数据表（支持网状分析）
+export const multiArmData = pgTable(
+  "multi_arm_data",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    networkMetaAnalysisId: varchar("network_meta_analysis_id", { length: 36 }).notNull(),
+    literatureId: varchar("literature_id", { length: 36 }).notNull(),
+    // 研究名称
+    studyName: varchar("study_name", { length: 255 }).notNull(),
+    // 年份
+    year: integer("year"),
+    // 臂数据（JSON数组，每个臂包含：干预名称、样本量、事件数/均值/标准差）
+    arms: jsonb("arms").notNull().$type<Array<{
+      interventionId: string;
+      interventionName: string;
+      sampleSize: number;
+      events?: number;      // 二分类
+      mean?: number;        // 连续变量
+      sd?: number;          // 连续变量
+    }>>(),
+    // 结局类型
+    outcomeType: varchar("outcome_type", { length: 100 }),
+    // 置信度
+    confidence: real("confidence"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("multi_arm_analysis_idx").on(table.networkMetaAnalysisId),
+    index("multi_arm_literature_idx").on(table.literatureId),
+  ]
+);
+
+// 直接比较结果表（两两比较）
+export const directComparisons = pgTable(
+  "direct_comparisons",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    networkMetaAnalysisId: varchar("network_meta_analysis_id", { length: 36 }).notNull(),
+    // 干预A（对照）
+    interventionA: varchar("intervention_a", { length: 255 }).notNull(),
+    // 干预B（试验）
+    interventionB: varchar("intervention_b", { length: 255 }).notNull(),
+    // 来源研究
+    studyName: varchar("study_name", { length: 255 }),
+    // 效应量
+    effectSize: real("effect_size").notNull(),
+    // 标准误
+    standardError: real("standard_error").notNull(),
+    // 置信区间
+    ciLower: real("ci_lower"),
+    ciUpper: real("ci_upper"),
+    // 样本量
+    sampleSizeA: integer("sample_size_a"),
+    sampleSizeB: integer("sample_size_b"),
+    // 事件数（二分类）
+    eventsA: integer("events_a"),
+    eventsB: integer("events_b"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("direct_comparison_analysis_idx").on(table.networkMetaAnalysisId),
+    index("direct_comparison_pair_idx").on(table.interventionA, table.interventionB),
+  ]
+);
+
+// 网状比较结果表（包含直接+间接比较）
+export const networkComparisons = pgTable(
+  "network_comparisons",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    networkMetaAnalysisId: varchar("network_meta_analysis_id", { length: 36 }).notNull(),
+    // 干预A（参照）
+    interventionA: varchar("intervention_a", { length: 255 }).notNull(),
+    // 干预B
+    interventionB: varchar("intervention_b", { length: 255 }).notNull(),
+    // 网状效应量
+    networkEffectSize: real("network_effect_size").notNull(),
+    // 网状标准误
+    networkStandardError: real("network_standard_error").notNull(),
+    // 网状置信区间
+    networkCiLower: real("network_ci_lower"),
+    networkCiUpper: real("network_ci_upper"),
+    // P值
+    pValue: real("p_value"),
+    // 比较类型: direct, indirect, network
+    comparisonType: varchar("comparison_type", { length: 20 }).notNull(),
+    // 直接比较效应量（如果有）
+    directEffectSize: real("direct_effect_size"),
+    directStandardError: real("direct_standard_error"),
+    // 间接比较效应量（如果有）
+    indirectEffectSize: real("indirect_effect_size"),
+    indirectStandardError: real("indirect_standard_error"),
+    // 一致性检验结果
+    inconsistencyPValue: real("inconsistency_p_value"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("network_comparison_analysis_idx").on(table.networkMetaAnalysisId),
+    index("network_comparison_pair_idx").on(table.interventionA, table.interventionB),
+  ]
+);
+
+// 治疗排名表（SUCRA）
+export const treatmentRankings = pgTable(
+  "treatment_rankings",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    networkMetaAnalysisId: varchar("network_meta_analysis_id", { length: 36 }).notNull(),
+    // 干预措施
+    intervention: varchar("intervention", { length: 255 }).notNull(),
+    // SUCRA值（0-1）
+    sucra: real("sucra").notNull(),
+    // 平均排名
+    meanRank: real("mean_rank"),
+    // 各排名概率（JSON数组，如[0.1, 0.3, 0.4, 0.2]表示排名第1-4的概率）
+    rankProbabilities: jsonb("rank_probabilities").$type<number[]>(),
+    // 总研究数
+    numberOfStudies: integer("number_of_studies"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("treatment_ranking_analysis_idx").on(table.networkMetaAnalysisId),
+    index("treatment_ranking_sucra_idx").on(table.sucra),
+  ]
+);
+
+// 网状结构信息表
+export const networkStructure = pgTable(
+  "network_structure",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    networkMetaAnalysisId: varchar("network_meta_analysis_id", { length: 36 }).notNull(),
+    // 干预措施数量
+    numberOfInterventions: integer("number_of_interventions").notNull(),
+    // 直接比较数量
+    numberOfComparisons: integer("number_of_comparisons").notNull(),
+    // 研究总数
+    numberOfStudies: integer("number_of_studies").notNull(),
+    // 是否存在闭合环
+    hasLoops: boolean("has_loops").default(false),
+    // 连通性: connected, disconnected
+    connectivity: varchar("connectivity", { length: 20 }).default("connected"),
+    // 节点信息（JSON）
+    nodes: jsonb("nodes").notNull().$type<Array<{
+      id: string;
+      name: string;
+      numberOfStudies: number;
+      sampleSize: number;
+    }>>(),
+    // 边信息（JSON）
+    edges: jsonb("edges").notNull().$type<Array<{
+      source: string;
+      target: string;
+      numberOfStudies: number;
+      totalSampleSize: number;
+    }>>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("network_structure_analysis_idx").on(table.networkMetaAnalysisId),
+  ]
+);
+
+// 一致性检验结果表
+export const consistencyResults = pgTable(
+  "consistency_results",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    networkMetaAnalysisId: varchar("network_meta_analysis_id", { length: 36 }).notNull(),
+    // 检验方法: bucher, nodesplit, designbytreatment
+    testMethod: varchar("test_method", { length: 50 }).notNull(),
+    // 检验的闭合环
+    loop: jsonb("loop").$type<string[]>(),
+    // 直接效应量
+    directEffect: real("direct_effect"),
+    // 间接效应量
+    indirectEffect: real("indirect_effect"),
+    // 差异
+    difference: real("difference"),
+    // 差异标准误
+    differenceSe: real("difference_se"),
+    // 一致性P值
+    consistencyPValue: real("consistency_p_value"),
+    // 是否一致
+    isConsistent: boolean("is_consistent"),
+    // 结论
+    conclusion: text("conclusion"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("consistency_results_analysis_idx").on(table.networkMetaAnalysisId),
+  ]
+);
+
 // TypeScript types
 export type Literature = typeof literature.$inferSelect;
 export type ExtractedData = typeof extractedData.$inferSelect;
@@ -260,3 +538,13 @@ export type AnalysisDataRelation = typeof analysisDataRelation.$inferSelect;
 export type QualityAssessment = typeof qualityAssessment.$inferSelect;
 export type ClassificationDimension = typeof classificationDimensions.$inferSelect;
 export type LiteratureClassification = typeof literatureClassifications.$inferSelect;
+
+// 网状Meta分析相关类型
+export type Intervention = typeof interventions.$inferSelect;
+export type NetworkMetaAnalysisType = typeof networkMetaAnalysis.$inferSelect;
+export type MultiArmData = typeof multiArmData.$inferSelect;
+export type DirectComparison = typeof directComparisons.$inferSelect;
+export type NetworkComparison = typeof networkComparisons.$inferSelect;
+export type TreatmentRanking = typeof treatmentRankings.$inferSelect;
+export type NetworkStructure = typeof networkStructure.$inferSelect;
+export type ConsistencyResult = typeof consistencyResults.$inferSelect;
