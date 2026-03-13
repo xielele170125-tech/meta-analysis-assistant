@@ -476,12 +476,34 @@ export async function POST(request: NextRequest) {
         await client.from('extracted_data').insert(dataToInsert);
       }
 
-      // 更新状态为完成
+      // 从第一个研究的 study_name 中解析作者和年份
+      let authors: string | null = null;
+      let year: number | null = null;
+      
+      if (extractedStudies.length > 0 && extractedStudies[0].study_name) {
+        const studyName = extractedStudies[0].study_name as string;
+        // 尝试解析 "作者(年份)" 或 "作者 (年份)" 格式
+        const nameMatch = studyName.match(/^(.+?)\s*\((\d{4})\)/);
+        if (nameMatch) {
+          authors = nameMatch[1].trim();
+          year = parseInt(nameMatch[2], 10);
+        } else {
+          // 如果没有年份，只提取作者
+          const authorMatch = studyName.match(/^(.+?)(?:\s|$)/);
+          if (authorMatch) {
+            authors = authorMatch[1].trim();
+          }
+        }
+      }
+
+      // 更新状态为完成，同时更新作者和年份
       await client
         .from('literature')
         .update({
           status: 'completed',
           error_message: null,
+          authors: authors,
+          year: year,
         })
         .eq('id', literatureId);
 

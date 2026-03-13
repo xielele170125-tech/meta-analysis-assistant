@@ -202,9 +202,28 @@ export default function QualityAssessmentTable({ assessments }: QualityAssessmen
   // 获取研究名称
   const getStudyName = (assessment: QualityAssessment) => {
     if (assessment.literature) {
+      // 优先使用作者+年份格式
       const authors = assessment.literature.authors?.split(',')[0] || '';
       const year = assessment.literature.year || '';
-      return `${authors} ${year}`.trim() || '未命名';
+      if (authors && year) {
+        return `${authors} (${year})`;
+      }
+      if (authors) {
+        return authors;
+      }
+      // 备用：使用标题（清理文件名格式）
+      if (assessment.literature.title) {
+        // 去掉文件扩展名和数字序号前缀，如 "1.filename" -> "filename"
+        let title = assessment.literature.title
+          .replace(/\.[^/.]+$/, '') // 去掉扩展名
+          .replace(/^\d+\./, '') // 去掉序号前缀
+          .replace(/_/g, ' '); // 下划线转空格
+        // 截取前30个字符
+        if (title.length > 30) {
+          title = title.substring(0, 30) + '...';
+        }
+        return title;
+      }
     }
     return `研究 ${assessment.literature_id.slice(0, 8)}`;
   };

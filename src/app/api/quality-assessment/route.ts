@@ -432,10 +432,18 @@ export async function GET(request: NextRequest) {
     const scaleType = searchParams.get('scaleType');
 
     if (!literatureId) {
-      // 获取所有评估结果
+      // 获取所有评估结果，关联文献信息
       const { data, error } = await client
         .from('quality_assessment')
-        .select('*')
+        .select(`
+          *,
+          literature:literature_id (
+            id,
+            title,
+            authors,
+            year
+          )
+        `)
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -447,7 +455,15 @@ export async function GET(request: NextRequest) {
 
     let query = client
       .from('quality_assessment')
-      .select('*')
+      .select(`
+        *,
+        literature:literature_id (
+          id,
+          title,
+          authors,
+          year
+        )
+      `)
       .eq('literature_id', literatureId);
 
     if (scaleType) {
