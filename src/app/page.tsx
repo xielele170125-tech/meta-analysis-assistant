@@ -258,6 +258,19 @@ export default function Home() {
     notFound: number;
     failed: number;
   } | null>(null);
+  // 待选择的关联结果（多候选匹配）
+  const [pendingSelections, setPendingSelections] = useState<Array<{
+    fileName: string;
+    fileData: string;
+    candidates: Array<{
+      id: string;
+      title: string;
+      authors?: string;
+      year?: number;
+      doi?: string;
+    }>;
+  }>>([]);
+  const [currentSelectionIndex, setCurrentSelectionIndex] = useState(0);
 
   useEffect(() => {
     setMounted(true);
@@ -586,11 +599,17 @@ export default function Home() {
         setAttachResult(data.data);
         await loadLiterature();
         
-        if (data.data.attached > 0) {
-          alert(`成功关联 ${data.data.attached} 个 PDF 文件`);
-        }
-        if (data.data.notFound > 0) {
-          alert(`${data.data.notFound} 个文件无法匹配到已有文献，已创建新文献记录`);
+        // 处理待选择的关联结果（多候选匹配）
+        if (data.data.pendingSelections && data.data.pendingSelections.length > 0) {
+          setPendingSelections(data.data.pendingSelections);
+          setCurrentSelectionIndex(0);
+        } else {
+          if (data.data.attached > 0) {
+            alert(`成功关联 ${data.data.attached} 个 PDF 文件`);
+          }
+          if (data.data.notFound > 0) {
+            alert(`${data.data.notFound} 个文件无法匹配到已有文献，已创建新文献记录`);
+          }
         }
       } else {
         alert('关联失败: ' + data.error);
@@ -601,6 +620,54 @@ export default function Home() {
     } finally {
       setAttachingPdf(false);
       e.target.value = '';
+    }
+  };
+
+  // 确认关联选择
+  const handleConfirmSelection = async (literatureId: string | null, createNew: boolean) => {
+    if (pendingSelections.length === 0) return;
+    
+    const current = pendingSelections[currentSelectionIndex];
+    
+    try {
+      const res = await fetch('/api/literature/attach-pdf', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          literatureId,
+          fileName: current.fileName,
+          fileData: current.fileData,
+          createNew,
+        }),
+      });
+      const data = await res.json();
+      
+      if (data.success) {
+        // 处理下一个待选择的文件
+        if (currentSelectionIndex < pendingSelections.length - 1) {
+          setCurrentSelectionIndex(currentSelectionIndex + 1);
+        } else {
+          // 所有选择完成
+          setPendingSelections([]);
+          setCurrentSelectionIndex(0);
+          await loadLiterature();
+        }
+      } else {
+        alert('关联失败: ' + data.error);
+      }
+    } catch (error) {
+      console.error('Confirm selection error:', error);
+      alert('关联失败');
+    }
+  };
+
+  // 跳过当前选择
+  const handleSkipSelection = () => {
+    if (currentSelectionIndex < pendingSelections.length - 1) {
+      setCurrentSelectionIndex(currentSelectionIndex + 1);
+    } else {
+      setPendingSelections([]);
+      setCurrentSelectionIndex(0);
     }
   };
 
@@ -2138,6 +2205,79 @@ export default function Home() {
                 <p className="text-sm text-slate-600 dark:text-slate-300">
                   <strong>使用说明:</strong> 请确保已安装 R 和必要的包 (meta, metafor, ggplot2)。首次运行时会自动安装缺失的包。
                 </p>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* PDF关联选择对话框 */}
+      <Dialog open={pendingSelections.length > 0} onOpenChange={(open) => !open && setPendingSelections([])}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileUp className="h-5 w-5" />
+              选择关联文献 ({currentSelectionIndex + 1}/{pendingSelections.length})
+            </DialogTitle>
+            <DialogDescription>
+              文件名：<span className="font-medium text-slate-700 dark:text-slate-300">{pendingSelections[currentSelectionIndex]?.fileName}</span>
+              <br />
+              <span className="text-sm">找到 {pendingSelections[currentSelectionIndex]?.candidates.length || 0} 个可能匹配的文献，请选择正确的关联对象</span>
+            </DialogDescription>
+          </DialogHeader>
+
+          {pendingSelections.length > 0 && (
+            <div className="space-y-4">
+              {/* 候选文献列表 */}
+              <div className="space-y-2">
+                {pendingSelections[currentSelectionIndex]?.candidates.map((candidate, idx) => (
+                  <div 
+                    key={candidate.id}
+                    className="flex items-center justify-between p-3 border rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800"
+                  >
+                    <div className="flex-1">
+                      <div className="font-medium text-sm">{candidate.title}</div>
+                      {candidate.authors && (
+                        <div className="text-xs text-slate-500 mt-1">
+                          作者：{candidate.authors}
+                          {candidate.year && ` (${candidate.year})`}
+                        </div>
+                      )}
+                      {candidate.doi && (
+                        <div className="text-xs text-slate-400 mt-0.5">
+                          DOI: {candidate.doi}
+                        </div>
+                      )}
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => handleConfirmSelection(candidate.id, false)}
+                    >
+                      选择此项
+                    </Button>
+                  </div>
+                ))}
+              </div>
+
+              {/* 操作按钮 */}
+              <div className="flex justify-between pt-4 border-t">
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => handleConfirmSelection(null, true)}
+                  >
+                    创建为新文献
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={handleSkipSelection}
+                  >
+                    跳过
+                  </Button>
+                </div>
+                <div className="text-sm text-slate-500 self-center">
+                  {currentSelectionIndex + 1} / {pendingSelections.length}
+                </div>
               </div>
             </div>
           )}
