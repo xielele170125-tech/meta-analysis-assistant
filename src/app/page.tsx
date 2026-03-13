@@ -132,6 +132,7 @@ interface ImportResultRecord {
   status: 'imported' | 'no_pdf' | 'failed';
   message: string;
   literatureId?: string;
+  pdfSearchLinks?: Array<{ name: string; url: string }>;
 }
 
 interface ImportResult {
@@ -1981,7 +1982,7 @@ export default function Home() {
                       <TableHead>状态</TableHead>
                       <TableHead>文献</TableHead>
                       <TableHead>DOI</TableHead>
-                      <TableHead>说明</TableHead>
+                      <TableHead>说明 / PDF获取</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1994,7 +1995,24 @@ export default function Home() {
                         </TableCell>
                         <TableCell className="max-w-xs truncate">{record.title}</TableCell>
                         <TableCell className="max-w-xs truncate">{record.doi || '-'}</TableCell>
-                        <TableCell className="text-sm text-slate-500">{record.message}</TableCell>
+                        <TableCell className="text-sm">
+                          <div className="text-slate-500">{record.message}</div>
+                          {record.pdfSearchLinks && record.pdfSearchLinks.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {record.pdfSearchLinks.map((link, j) => (
+                                <a
+                                  key={j}
+                                  href={link.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded"
+                                >
+                                  {link.name}
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

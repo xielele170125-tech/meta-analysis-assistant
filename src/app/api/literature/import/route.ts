@@ -24,6 +24,7 @@ interface ImportResult {
     status: 'imported' | 'no_pdf' | 'failed';
     message: string;
     literatureId?: string;
+    pdfSearchLinks?: Array<{ name: string; url: string }>;
   }>;
 }
 
@@ -201,8 +202,107 @@ async function getPDFByCORE(doi: string): Promise<{ url: string; source: string 
 }
 
 /**
+ * 通过 bioRxiv/medRxiv API 获取 PDF 链接
+ */
+async function getPDFByBiorxiv(doi: string): Promise<{ url: string; source: string } | null> {
+  try {
+    // 检查是否是 bioRxiv/medRxiv 的 DOI
+    if (!doi.includes('biorxiv') && !doi.includes('medrxiv')) {
+      return null;
+    }
+    
+    const apiUrl = `https://api.biorxiv.org/details/biorxiv/${encodeURIComponent(doi)}`;
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    const response = await fetch(apiUrl, {
+      headers: { 
+        'User-Agent': 'Meta-Analysis-Tool/1.0',
+      },
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    
+    if (data.collection && data.collection.length > 0) {
+      const record = data.collection[0];
+      // bioRxiv PDF URL 格式
+      const pdfUrl = `https://www.biorxiv.org/content/${record.doi}v${record.version}.full.pdf`;
+      return { url: pdfUrl, source: 'biorxiv' };
+    }
+    
+    return null;
+  } catch (error) {
+    console.error(`[bioRxiv] Error:`, error);
+    return null;
+  }
+}
+
+/**
+ * 通过 PubMed 获取 PMC PDF 链接（增强版）
+ */
+async function getPDFByPubMed(doi: string, pmid?: string): Promise<{ url: string; source: string } | null> {
+  try {
+    // 如果没有 PMID，先通过 DOI 查找
+    if (!pmid) {
+      const searchUrl = `https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(doi)}&format=json`;
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+      const searchResponse = await fetch(searchUrl, {
+        headers: { 'User-Agent': 'Meta-Analysis-Tool/1.0' },
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!searchResponse.ok) return null;
+
+      const searchData = await searchResponse.json();
+      pmid = searchData.result?.uids?.[0];
+    }
+
+    if (!pmid) return null;
+
+    // 通过 PMC ID 获取 PDF
+    const pmcApiUrl = `https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi?id=${pmid}`;
+    
+    const pmcController = new AbortController();
+    const pmcTimeoutId = setTimeout(() => pmcController.abort(), 15000);
+
+    const pmcResponse = await fetch(pmcApiUrl, {
+      headers: { 'User-Agent': 'Meta-Analysis-Tool/1.0' },
+      signal: pmcController.signal,
+    });
+
+    clearTimeout(pmcTimeoutId);
+
+    if (!pmcResponse.ok) return null;
+
+    const pmcText = await pmcResponse.text();
+    
+    // 解析 XML 找到 PDF 链接
+    const pdfMatch = pmcText.match(/<link[^>]*format="pdf"[^>]*href="([^"]+)"/i);
+    if (pdfMatch) {
+      return { url: pdfMatch[1], source: 'pmc' };
+    }
+
+    return null;
+  } catch (error) {
+    console.error(`[PubMed] Error:`, error);
+    return null;
+  }
+}
+
+/**
  * 综合多个来源获取 PDF
- * 按优先级依次尝试：Unpaywall -> Semantic Scholar -> PMC -> CORE
+ * 按优先级依次尝试多个数据源
  */
 async function getPDFByDOI(doi: string): Promise<{ url: string; source: string } | null> {
   console.log(`[PDF Download] Searching for DOI: ${doi}`);
@@ -221,14 +321,21 @@ async function getPDFByDOI(doi: string): Promise<{ url: string; source: string }
     return ssResult;
   }
   
-  // 3. PubMed Central - 生物医学文献
-  const pmcResult = await getPDFByPMC(doi);
+  // 3. bioRxiv/medRxiv - 预印本服务器
+  const biorxivResult = await getPDFByBiorxiv(doi);
+  if (biorxivResult) {
+    console.log(`[PDF Download] Found via bioRxiv/medRxiv`);
+    return biorxivResult;
+  }
+  
+  // 4. PubMed Central - 生物医学文献
+  const pmcResult = await getPDFByPubMed(doi);
   if (pmcResult) {
     console.log(`[PDF Download] Found via PMC`);
     return pmcResult;
   }
   
-  // 4. CORE - 开放获取论文聚合
+  // 5. CORE - 开放获取论文聚合
   const coreResult = await getPDFByCORE(doi);
   if (coreResult) {
     console.log(`[PDF Download] Found via CORE`);
@@ -237,6 +344,56 @@ async function getPDFByDOI(doi: string): Promise<{ url: string; source: string }
   
   console.log(`[PDF Download] No PDF found from any source`);
   return null;
+}
+
+/**
+ * 生成 PDF 搜索链接（供用户手动查找）
+ */
+function generatePDFSearchLinks(title: string, doi: string | null): Array<{ name: string; url: string }> {
+  const links: Array<{ name: string; url: string }> = [];
+  
+  const encodedTitle = encodeURIComponent(title);
+  
+  // 谷歌学术
+  links.push({
+    name: '谷歌学术',
+    url: `https://scholar.google.com/scholar?q=${encodedTitle}`,
+  });
+  
+  // PubMed
+  links.push({
+    name: 'PubMed',
+    url: `https://pubmed.ncbi.nlm.nih.gov/?term=${encodedTitle}`,
+  });
+  
+  // 如果有 DOI
+  if (doi) {
+    // DOI 直接解析
+    links.push({
+      name: 'DOI解析',
+      url: `https://doi.org/${doi}`,
+    });
+    
+    // Sci-Hub（注意：这可能涉及版权问题，仅供个人研究使用）
+    links.push({
+      name: 'Sci-Hub',
+      url: `https://sci-hub.se/${doi}`,
+    });
+  }
+  
+  // ResearchGate
+  links.push({
+    name: 'ResearchGate',
+    url: `https://www.researchgate.net/search?q=${encodedTitle}`,
+  });
+  
+  // bioRxiv/medRxiv 搜索
+  links.push({
+    name: 'bioRxiv',
+    url: `https://www.biorxiv.org/search/${encodedTitle}`,
+  });
+  
+  return links;
 }
 
 /**
@@ -372,19 +529,22 @@ export async function POST(request: NextRequest) {
               fileUrl = uploadResult.url;
               pdfDownloaded = true;
               result.withPdf++;
-              pdfMessage = `已自动下载 PDF`;
+              pdfMessage = `已自动下载 PDF (来源: ${pdfResult.source})`;
             } else {
-              pdfMessage = '找到 PDF 链接但下载失败，请手动上传';
+              pdfMessage = '找到 PDF 链接但下载失败，请手动下载';
               console.log(`[Import] PDF download failed for ${record.doi}`);
             }
           } else {
-            pdfMessage = '该文献无开放获取 PDF，需手动上传';
+            pdfMessage = '该文献无开放获取 PDF，请手动获取';
           }
         } else if (!record.doi) {
-          pdfMessage = '无 DOI 信息，无法自动下载';
+          pdfMessage = '无 DOI 信息，无法自动下载，请手动获取';
         } else if (!autoDownloadPdf) {
           pdfMessage = '已导入，可手动上传 PDF';
         }
+
+        // 生成 PDF 搜索链接（当无法自动下载时）
+        const pdfSearchLinks = !pdfDownloaded ? generatePDFSearchLinks(record.title || '', record.doi || null) : undefined;
 
         // 创建文献记录
         const { data: literature, error } = await client
@@ -409,6 +569,7 @@ export async function POST(request: NextRequest) {
             doi: record.doi || null,
             status: 'failed',
             message: error.message,
+            pdfSearchLinks,
           });
           continue;
         }
@@ -424,8 +585,9 @@ export async function POST(request: NextRequest) {
           status: pdfDownloaded ? 'imported' : 'no_pdf',
           message: pdfDownloaded 
             ? pdfMessage || '已导入并下载 PDF'
-            : pdfMessage || '已导入，需要手动上传 PDF',
+            : pdfMessage || '已导入，点击搜索链接获取 PDF',
           literatureId: literature.id,
+          pdfSearchLinks,
         });
       } catch (recordError) {
         result.failed++;
