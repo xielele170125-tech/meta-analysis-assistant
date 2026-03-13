@@ -4,20 +4,30 @@ import { getSupabaseClient } from '@/storage/database/supabase-client';
 const client = getSupabaseClient();
 
 /**
- * 从 raw_content 提取 abstract 和 keywords
+ * 从 raw_content 提取详细信息
  */
-function extractFromRawContent(rawContent: string | null): { abstract: string; keywords: string[] } {
+function extractFromRawContent(rawContent: string | null): { 
+  abstract: string; 
+  keywords: string[]; 
+  volume?: string;
+  issue?: string;
+  pages?: string;
+} {
   if (!rawContent) {
     return { abstract: '', keywords: [] };
   }
   
   try {
     const parsed = JSON.parse(rawContent);
-    const abstract = parsed.abstract || '';
-    const keywords = Array.isArray(parsed.keywords) 
-      ? parsed.keywords 
-      : (parsed.keywords ? parsed.keywords.split(/[,;]/) : []);
-    return { abstract, keywords };
+    return {
+      abstract: parsed.abstract || '',
+      keywords: Array.isArray(parsed.keywords) 
+        ? parsed.keywords 
+        : (parsed.keywords ? parsed.keywords.split(/[,;]/) : []),
+      volume: parsed.volume || undefined,
+      issue: parsed.issue || undefined,
+      pages: parsed.pages || undefined,
+    };
   } catch {
     // 如果不是 JSON，可能是纯文本摘要
     return { abstract: rawContent.substring(0, 5000), keywords: [] };
@@ -36,10 +46,10 @@ export async function GET(request: NextRequest) {
     const dimensionId = searchParams.get('dimensionId');
     const category = searchParams.get('category');
 
-    // 构建查询（使用 raw_content 替代 abstract/keywords）
+    // 构建查询（只查询存在的字段，volume/issue/pages 从 raw_content 提取）
     let query = client
       .from('literature')
-      .select('id, title, authors, year, doi, journal, volume, issue, pages, raw_content');
+      .select('id, title, authors, year, doi, journal, raw_content');
 
     // 按ID筛选
     if (literatureIds.length > 0) {
@@ -109,8 +119,8 @@ export async function GET(request: NextRequest) {
  */
 function generateRis(literature: any[]): string {
   const risEntries = literature.map((lit) => {
-    // 从 raw_content 提取摘要和关键词
-    const { abstract, keywords } = extractFromRawContent(lit.raw_content);
+    // 从 raw_content 提取详细信息
+    const { abstract, keywords, volume, issue, pages } = extractFromRawContent(lit.raw_content);
     
     const lines: string[] = [];
 
@@ -146,19 +156,19 @@ function generateRis(literature: any[]): string {
       lines.push(`JF  - ${lit.journal}`);
     }
 
-    // 卷
-    if (lit.volume) {
-      lines.push(`VL  - ${lit.volume}`);
+    // 卷（从 raw_content 提取）
+    if (volume) {
+      lines.push(`VL  - ${volume}`);
     }
 
-    // 期
-    if (lit.issue) {
-      lines.push(`IS  - ${lit.issue}`);
+    // 期（从 raw_content 提取）
+    if (issue) {
+      lines.push(`IS  - ${issue}`);
     }
 
-    // 页码
-    if (lit.pages) {
-      lines.push(`SP  - ${lit.pages}`);
+    // 页码（从 raw_content 提取）
+    if (pages) {
+      lines.push(`SP  - ${pages}`);
     }
 
     // DOI
@@ -195,8 +205,8 @@ function generateRis(literature: any[]): string {
  */
 function generateXml(literature: any[]): string {
   const xmlRecords = literature.map((lit) => {
-    // 从 raw_content 提取摘要和关键词
-    const { abstract, keywords } = extractFromRawContent(lit.raw_content);
+    // 从 raw_content 提取详细信息
+    const { abstract, keywords, volume, issue, pages } = extractFromRawContent(lit.raw_content);
     
     const authorsXml = lit.authors
       ? lit.authors
@@ -219,9 +229,9 @@ function generateXml(literature: any[]): string {
 ${authorsXml}
     <year>${lit.year || ''}</year>
     <journal>${escapeXml(lit.journal || '')}</journal>
-    <volume>${lit.volume || ''}</volume>
-    <issue>${lit.issue || ''}</issue>
-    <pages>${lit.pages || ''}</pages>
+    <volume>${volume || ''}</volume>
+    <issue>${issue || ''}</issue>
+    <pages>${pages || ''}</pages>
     <doi>${escapeXml(lit.doi || '')}</doi>
     <abstract>${escapeXml(abstract.substring(0, 5000) || '')}</abstract>
 ${keywordsXml}

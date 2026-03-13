@@ -2019,8 +2019,41 @@ export default function Home() {
                   {/* 分类结果 */}
                   {classificationResults.length > 0 && (
                     <div className="border rounded-lg">
-                      <div className="p-4 border-b bg-slate-50">
-                        <h3 className="font-medium">分类结果</h3>
+                      <div className="p-4 border-b bg-slate-50 flex items-center justify-between">
+                        <h3 className="font-medium">分类结果 ({classificationResults.length} 篇)</h3>
+                        <div className="flex gap-2">
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={exportByCategory}
+                          >
+                            <Download className="h-4 w-4 mr-1" />
+                            按分类导出
+                          </Button>
+                          <Button 
+                            variant="default" 
+                            size="sm"
+                            onClick={async () => {
+                              if (!selectedDimension) return;
+                              // 导出当前维度所有分类的文献
+                              const ids = classificationResults.map(r => r.literature_id).join(',');
+                              const res = await fetch(`/api/literature/export?format=ris&ids=${ids}`);
+                              if (res.ok) {
+                                const blob = await res.blob();
+                                const url = window.URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                const dimension = classificationDimensions.find(d => d.id === selectedDimension);
+                                a.download = `${dimension?.name || 'classification'}_all.ris`;
+                                a.click();
+                                window.URL.revokeObjectURL(url);
+                              }
+                            }}
+                          >
+                            <FileText className="h-4 w-4 mr-1" />
+                            导出全部 RIS
+                          </Button>
+                        </div>
                       </div>
                       <ScrollArea className="h-[400px]">
                         <Table>
