@@ -46,11 +46,12 @@ async function extractPdfMetadata(buffer: Buffer): Promise<{
       text += pageText + '\n';
     }
     
-    const firstPage = text.split('\n')[0] || text; // 第一页内容
+    // 使用全部提取的文本（前3页），而不是只取第一行
+    console.log('[PDF Metadata] Total text length:', text.length);
     
-    console.log('[PDF Metadata] First page length:', firstPage.length);
+    const result: { doi?: string; title?: string; authors?: string[] } = {};
     
-    // 提取 DOI（支持多种格式）
+    // 1. 提取 DOI（支持多种格式）
     const doiPatterns = [
       /doi[:\s]*([10]\.\d{4,}\/[^\s\n\r]+)/i,
       /https?:\/\/(?:dx\.)?doi\.org\/([10]\.\d{4,}\/[^\s\n\r]+)/i,
@@ -58,69 +59,67 @@ async function extractPdfMetadata(buffer: Buffer): Promise<{
     ];
     
     for (const pattern of doiPatterns) {
-      const match = firstPage.match(pattern);
+      const match = text.match(pattern);
       if (match) {
         let doi = match[1].replace(/[)\]>}.,;:]+$/, ''); // 清理尾部标点
         console.log('[PDF Metadata] Found DOI:', doi);
-        return { doi };
+        result.doi = doi;
+        break;
       }
     }
     
-    // 提取标题（通常在前几行，字体较大）
-    const lines = firstPage.split('\n').filter((l: string) => l.trim().length > 10);
+    // 2. 提取标题和作者（从第一页的前面部分）
+    const firstPageText = text.split('\n')[0] || text;
+    const lines = firstPageText.split(/\s+/).filter((l: string) => l.trim().length > 5);
+    
+    // 标题通常在前几行
     if (lines.length > 0) {
-      // 标题通常是第一个较长的非空行
-      let title = lines[0].trim();
+      // 合并前几行作为可能的标题（PDF文本提取可能分行）
+      let title = lines.slice(0, Math.min(3, lines.length)).join(' ');
       // 清理标题
       title = title.replace(/^\d+[\.\-\s]*/, '').trim();
-      // 如果标题太短，尝试下一行
-      if (title.length < 20 && lines.length > 1) {
-        title = lines[1].trim();
+      // 截取合理长度
+      if (title.length > 20) {
+        result.title = title.substring(0, 200);
+        console.log('[PDF Metadata] Extracted title:', result.title.substring(0, 100));
       }
-      console.log('[PDF Metadata] Extracted title:', title.substring(0, 100));
-      
-      // 提取作者（标题后面，通常有特殊格式）
-      const authors: string[] = [];
-      const authorSection = firstPage.substring(0, 2000); // 前2000字符
-      
-      // 常见作者格式匹配
-      // 1. 姓名格式：Zhang San, Li Si, Wang Wu
-      // 2. 带上标格式：Zhang San¹, Li Si²
-      // 3. 带 and/or：Zhang San and Li Si
-      const authorPatterns = [
-        // 带数字上标的作者列表
-        /(?:Authors?[:\s]*|By\s+)([A-Z][a-z]+\s+[A-Z][a-z]+(?:\s*[†¹²³⁴⁵*]?\s*,\s*[A-Z][a-z]+\s+[A-Z][a-z]+)*)/i,
-        // 中文章节后的作者
-        /(?:作者|Author)[：:\s]*([^\n]+)/,
-        // 多个作者用逗号分隔
-        /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?(?:\s*,\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)*)\s*$/m,
-      ];
-      
-      for (const pattern of authorPatterns) {
-        const match = authorSection.match(pattern);
-        if (match) {
-          const authorStr = match[1]
-            .replace(/[†¹²³⁴⁵*]/g, '')
-            .replace(/\s+/g, ' ')
-            .trim();
-          const authorList = authorStr.split(/,|;|and|&/i)
-            .map((a: string) => a.trim())
-            .filter((a: string) => a.length > 2 && a.length < 50);
-          if (authorList.length > 0) {
-            authors.push(...authorList);
-            break;
-          }
-        }
-      }
-      
-      if (authors.length > 0) {
-        console.log('[PDF Metadata] Extracted authors:', authors.slice(0, 3).join(', '));
-      }
-      
-      return { title, authors };
     }
     
-    return {};
+    // 3. 提取作者（在标题后面，通常有特殊格式）
+    const authors: string[] = [];
+    const authorSection = text.substring(0, 3000); // 前3000字符
+    
+    // 常见作者格式匹配
+    const authorPatterns = [
+      // 带数字上标的作者列表
+      /(?:Authors?[:\s]*|By\s+)([A-Z][a-z]+\s+[A-Z][a-z]+(?:\s*[†¹²³⁴⁵*]?\s*,\s*[A-Z][a-z]+\s+[A-Z][a-z]+)*)/i,
+      // 中文章节后的作者
+      /(?:作者|Author)[：:\s]*([^\n]+)/,
+    ];
+    
+    for (const pattern of authorPatterns) {
+      const match = authorSection.match(pattern);
+      if (match) {
+        const authorStr = match[1]
+          .replace(/[†¹²³⁴⁵*]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        const authorList = authorStr.split(/,|;|and|&/i)
+          .map((a: string) => a.trim())
+          .filter((a: string) => a.length > 2 && a.length < 50);
+        if (authorList.length > 0) {
+          authors.push(...authorList);
+          break;
+        }
+      }
+    }
+    
+    if (authors.length > 0) {
+      result.authors = authors;
+      console.log('[PDF Metadata] Extracted authors:', authors.slice(0, 3).join(', '));
+    }
+    
+    return result;
   } catch (error) {
     console.error('[PDF Metadata] Extract error:', error);
     return {};
@@ -217,11 +216,15 @@ export async function POST(request: NextRequest) {
       records: [],
     };
 
-    // 获取所有文献，用于匹配
+    // 获取所有文献，用于匹配（优先匹配没有PDF的文献）
     const { data: allLiterature } = await client
       .from('literature')
-      .select('id, title, authors, year, doi')
+      .select('id, title, authors, year, doi, file_key')
       .order('created_at', { ascending: false });
+
+    // 分离有无PDF的文献，优先匹配无PDF的
+    const literatureWithoutPdf = allLiterature?.filter(lit => !lit.file_key) || [];
+    const literatureWithPdf = allLiterature?.filter(lit => lit.file_key) || [];
 
     for (const file of files) {
       try {
@@ -249,12 +252,16 @@ export async function POST(request: NextRequest) {
           
           // 提取PDF元数据
           pdfMetadata = await extractPdfMetadata(buffer);
-          console.log(`[Attach PDF] Metadata for ${fileName}:`, pdfMetadata);
+          console.log(`[Attach PDF] Metadata for ${fileName}:`, JSON.stringify(pdfMetadata));
+          
+          // 优先在没有PDF的文献中匹配
+          const matchPool = literatureWithoutPdf.length > 0 ? literatureWithoutPdf : literatureWithPdf;
+          console.log(`[Attach PDF] Match pool size: ${matchPool.length} (without PDF: ${literatureWithoutPdf.length})`);
           
           // 2.1 优先用DOI精确匹配
-          if (pdfMetadata.doi && allLiterature) {
+          if (pdfMetadata.doi && matchPool.length > 0) {
             const doiLower = pdfMetadata.doi.toLowerCase();
-            targetLiterature = allLiterature.find(lit => 
+            targetLiterature = matchPool.find(lit => 
               lit.doi && lit.doi.toLowerCase() === doiLower
             );
             if (targetLiterature) {
@@ -263,10 +270,10 @@ export async function POST(request: NextRequest) {
           }
           
           // 2.2 用作者名匹配（至少一个作者名在文献作者字段中）
-          if (!targetLiterature && pdfMetadata.authors && pdfMetadata.authors.length > 0 && allLiterature) {
+          if (!targetLiterature && pdfMetadata.authors && pdfMetadata.authors.length > 0 && matchPool.length > 0) {
             const candidates: Array<{ lit: any; score: number }> = [];
             
-            for (const lit of allLiterature) {
+            for (const lit of matchPool) {
               if (!lit.authors) continue;
               const litAuthors = lit.authors.toLowerCase();
               let matchCount = 0;
@@ -274,10 +281,9 @@ export async function POST(request: NextRequest) {
               // 检查每个PDF作者是否在文献作者字段中
               for (const pdfAuthor of pdfMetadata.authors) {
                 const lastName = pdfAuthor.split(/\s+/).pop()?.toLowerCase() || '';
-                const firstName = pdfAuthor.split(/\s+/)[0]?.toLowerCase() || '';
                 
                 // 匹配姓氏（更可靠）
-                if (lastName && litAuthors.includes(lastName)) {
+                if (lastName && lastName.length > 2 && litAuthors.includes(lastName)) {
                   matchCount++;
                 }
               }
@@ -295,6 +301,7 @@ export async function POST(request: NextRequest) {
             
             // 排序并选择最佳匹配
             candidates.sort((a, b) => b.score - a.score);
+            console.log(`[Attach PDF] Author match candidates: ${candidates.length}`);
             
             if (candidates.length === 1 && candidates[0].score >= 10) {
               // 只有一个匹配，直接使用
@@ -332,28 +339,29 @@ export async function POST(request: NextRequest) {
             }
           }
           
-          // 2.3 用标题匹配
-          if (!targetLiterature && pdfMetadata.title && allLiterature) {
+          // 2.3 用标题匹配（降低阈值到0.3）
+          if (!targetLiterature && pdfMetadata.title && matchPool.length > 0) {
             const candidates: Array<{ lit: any; score: number }> = [];
             
-            for (const lit of allLiterature) {
+            for (const lit of matchPool) {
               if (!lit.title) continue;
               const similarity = calculateSimilarity(pdfMetadata.title, lit.title);
-              if (similarity >= 0.4) {
+              if (similarity >= 0.3) { // 降低阈值
                 candidates.push({ lit, score: similarity });
               }
             }
             
             candidates.sort((a, b) => b.score - a.score);
+            console.log(`[Attach PDF] Title match candidates: ${candidates.length}, best score: ${candidates[0]?.score || 0}`);
             
-            if (candidates.length === 1 && candidates[0].score >= 0.7) {
+            if (candidates.length === 1 && candidates[0].score >= 0.6) { // 降低阈值
               targetLiterature = candidates[0].lit;
               console.log(`[Attach PDF] Matched by title: ${pdfMetadata.title.substring(0, 50)}`);
             } else if (candidates.length > 1) {
               const topScore = candidates[0].score;
               const secondScore = candidates[1].score;
               
-              if (topScore >= 0.8 && topScore - secondScore >= 0.1) {
+              if (topScore >= 0.7 && topScore - secondScore >= 0.1) { // 降低阈值
                 targetLiterature = candidates[0].lit;
               } else {
                 // 多候选，需要用户选择
@@ -381,24 +389,25 @@ export async function POST(request: NextRequest) {
           // 2.4 最后尝试从文件名匹配
           if (!targetLiterature) {
             const searchTerms = extractSearchTerms(fileName);
+            console.log(`[Attach PDF] Search terms from filename:`, searchTerms);
             
-            if (searchTerms.doi && allLiterature) {
+            if (searchTerms.doi && matchPool.length > 0) {
               const doiLower = searchTerms.doi.toLowerCase();
-              targetLiterature = allLiterature.find(lit => 
+              targetLiterature = matchPool.find(lit => 
                 lit.doi && lit.doi.toLowerCase() === doiLower
               );
             }
             
-            if (!targetLiterature && searchTerms.title && allLiterature) {
-              const { data: candidates } = await client
-                .from('literature')
-                .select('id, title, authors, year')
-                .ilike('title', `%${searchTerms.title.substring(0, 50)}%`)
-                .limit(5);
+            if (!targetLiterature && searchTerms.title && matchPool.length > 0) {
+              // 使用更宽松的模糊匹配
+              const searchTitle = searchTerms.title.substring(0, 50);
+              const candidates = matchPool.filter(lit => 
+                lit.title && lit.title.toLowerCase().includes(searchTitle.toLowerCase())
+              );
               
-              if (candidates && candidates.length === 1) {
+              if (candidates.length === 1) {
                 targetLiterature = candidates[0];
-              } else if (candidates && candidates.length > 1) {
+              } else if (candidates.length > 1) {
                 const arrayBuffer2 = await file.arrayBuffer();
                 const base64 = Buffer.from(arrayBuffer2).toString('base64');
                 
@@ -409,7 +418,7 @@ export async function POST(request: NextRequest) {
                   title: null,
                   status: 'pending_selection',
                   message: `找到 ${candidates.length} 个可能的匹配，请手动选择`,
-                  candidates: candidates,
+                  candidates: candidates.slice(0, 5),
                   fileData: base64,
                 });
                 continue;
