@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -22,7 +23,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Checkbox } from '@/components/ui/checkbox';
 import {
   Table,
   TableBody,
@@ -33,7 +33,7 @@ import {
 } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet, Code2, TriangleAlert, TrendingUp, Search, GitCompare, Info, RefreshCw, ClipboardCheck, Star, AlertTriangle, CheckCircle2, Layers, FolderTree, Plus, X, Lightbulb, Sparkles, Clipboard, FileDigit, ChevronDown } from 'lucide-react';
+import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet, Code2, TriangleAlert, TrendingUp, Search, GitCompare, Info, RefreshCw, ClipboardCheck, Star, AlertTriangle, CheckCircle2, Layers, FolderTree, Plus, X, Lightbulb, Sparkles, Clipboard, FileDigit, ChevronDown, Play } from 'lucide-react';
 import QualityAssessmentTable from '@/components/QualityAssessmentTable';
 
 // 类型定义
@@ -260,6 +260,9 @@ export default function Home() {
     literature?: { id: string; title: string; authors?: string; year?: number };
   }>>([]);
   const [classifying, setClassifying] = useState(false);
+  const [selectedDimensionsForBatch, setSelectedDimensionsForBatch] = useState<string[]>([]);
+  const [batchClassifying, setBatchClassifying] = useState(false);
+  const [batchClassifyProgress, setBatchClassifyProgress] = useState<{current: number; total: number; currentName: string} | null>(null);
   const [showNewDimensionDialog, setShowNewDimensionDialog] = useState(false);
   const [newDimension, setNewDimension] = useState({ name: '', description: '', categories: '' });
   
@@ -487,7 +490,7 @@ export default function Home() {
     }
   };
 
-  // 执行AI分类
+  // 执行AI分类（单个维度）
   const classifyLiterature = async () => {
     if (!selectedDimension || !apiKey) {
       alert('请选择分类维度并配置API Key');
@@ -509,6 +512,7 @@ export default function Home() {
       if (data.success) {
         alert(`分类完成！共分类 ${data.data.classified} 篇文献`);
         loadClassificationResults(selectedDimension);
+        loadClassificationDimensions(); // 刷新统计
       } else {
         alert('分类失败: ' + data.error);
       }
@@ -517,6 +521,85 @@ export default function Home() {
       alert('分类失败');
     } finally {
       setClassifying(false);
+    }
+  };
+
+  // 批量执行多个维度的AI分类
+  const batchClassifyDimensions = async () => {
+    if (selectedDimensionsForBatch.length === 0) {
+      alert('请至少选择一个分类维度');
+      return;
+    }
+    if (!apiKey) {
+      alert('请先配置 DeepSeek API Key');
+      return;
+    }
+
+    const total = selectedDimensionsForBatch.length;
+    const results: {dimensionName: string; classified: number; error?: string}[] = [];
+    
+    setBatchClassifying(true);
+    
+    for (let i = 0; i < selectedDimensionsForBatch.length; i++) {
+      const dimensionId = selectedDimensionsForBatch[i];
+      const dim = classificationDimensions.find(d => d.id === dimensionId);
+      
+      setBatchClassifyProgress({
+        current: i + 1,
+        total,
+        currentName: dim?.name || '未知维度',
+      });
+
+      try {
+        const res = await fetch('/api/literature/classify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'classify',
+            dimensionId,
+            apiKey,
+          }),
+        });
+        const data = await res.json();
+        
+        if (data.success) {
+          results.push({
+            dimensionName: dim?.name || '未知维度',
+            classified: data.data.classified,
+          });
+        } else {
+          results.push({
+            dimensionName: dim?.name || '未知维度',
+            classified: 0,
+            error: data.error,
+          });
+        }
+      } catch (error) {
+        results.push({
+          dimensionName: dim?.name || '未知维度',
+          classified: 0,
+          error: '请求失败',
+        });
+      }
+    }
+
+    setBatchClassifying(false);
+    setBatchClassifyProgress(null);
+    
+    // 显示结果汇总
+    const successCount = results.filter(r => !r.error).length;
+    const totalCount = results.reduce((sum, r) => sum + r.classified, 0);
+    
+    const detailText = results.map(r => 
+      `${r.dimensionName}: ${r.error ? `❌ ${r.error}` : `✓ ${r.classified}篇`}`
+    ).join('\n');
+    
+    alert(`批量分类完成！\n\n成功: ${successCount}/${total} 个维度\n总共分类: ${totalCount} 篇文献\n\n${detailText}`);
+    
+    // 刷新数据
+    loadClassificationDimensions();
+    if (selectedDimension) {
+      loadClassificationResults(selectedDimension);
     }
   };
 
@@ -2004,53 +2087,124 @@ export default function Home() {
                   </div>
 
                   {/* 分类维度选择 */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {classificationDimensions.map((dim) => {
-                      const hasEnoughData = (dim.totalClassified || 0) >= 2;
-                      const validCategories = (dim.categories as string[]).filter(
-                        cat => (dim.categoryCounts?.[cat] || 0) >= 2
-                      );
-                      const isValidForMeta = validCategories.length >= 2;
-                      
-                      return (
-                      <Card 
-                        key={dim.id} 
-                        className={`cursor-pointer transition-all ${
-                          selectedDimension === dim.id ? 'ring-2 ring-blue-500' : ''
-                        } ${isValidForMeta ? 'border-green-200' : ''}`}
-                        onClick={() => {
-                          setSelectedDimension(dim.id);
-                          loadClassificationResults(dim.id);
-                        }}
-                      >
-                        <CardContent className="p-4">
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                              <h3 className="font-medium">{dim.name}</h3>
-                              {isValidForMeta && (
-                                <Badge variant="default" className="bg-green-500 text-xs">
-                                  可用于Meta
-                                </Badge>
+                  <div className="space-y-3">
+                    {/* 批量操作栏 */}
+                    {classificationDimensions.length > 0 && (
+                      <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+                        <Checkbox
+                          checked={selectedDimensionsForBatch.length === classificationDimensions.length}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setSelectedDimensionsForBatch(classificationDimensions.map(d => d.id));
+                            } else {
+                              setSelectedDimensionsForBatch([]);
+                            }
+                          }}
+                        />
+                        <span className="text-sm text-slate-600">
+                          全选 ({selectedDimensionsForBatch.length}/{classificationDimensions.length})
+                        </span>
+                        {selectedDimensionsForBatch.length > 0 && (
+                          <>
+                            <Button
+                              size="sm"
+                              onClick={batchClassifyDimensions}
+                              disabled={batchClassifying || !apiKey}
+                              className="ml-auto"
+                            >
+                              {batchClassifying ? (
+                                <>
+                                  {batchClassifyProgress && (
+                                    <span className="mr-2">
+                                      {batchClassifyProgress.current}/{batchClassifyProgress.total}
+                                    </span>
+                                  )}
+                                  <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                                  批量分类中...
+                                </>
+                              ) : (
+                                <>
+                                  <Play className="h-4 w-4 mr-1" />
+                                  批量分类 ({selectedDimensionsForBatch.length} 个维度)
+                                </>
                               )}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setSelectedDimensionsForBatch([])}
+                            >
+                              取消选择
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    
+                    {/* 维度卡片网格 */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {classificationDimensions.map((dim) => {
+                        const hasEnoughData = (dim.totalClassified || 0) >= 2;
+                        const validCategories = (dim.categories as string[]).filter(
+                          cat => (dim.categoryCounts?.[cat] || 0) >= 2
+                        );
+                        const isValidForMeta = validCategories.length >= 2;
+                        const isSelectedForBatch = selectedDimensionsForBatch.includes(dim.id);
+                        
+                        return (
+                        <Card 
+                          key={dim.id} 
+                          className={`cursor-pointer transition-all ${
+                            selectedDimension === dim.id ? 'ring-2 ring-blue-500' : ''
+                          } ${isSelectedForBatch ? 'ring-2 ring-green-500 bg-green-50/50' : ''} ${isValidForMeta ? 'border-green-200' : ''}`}
+                        >
+                          <CardContent className="p-4">
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <Checkbox
+                                  checked={isSelectedForBatch}
+                                  onCheckedChange={(checked) => {
+                                    if (checked) {
+                                      setSelectedDimensionsForBatch(prev => [...prev, dim.id]);
+                                    } else {
+                                      setSelectedDimensionsForBatch(prev => prev.filter(id => id !== dim.id));
+                                    }
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                                <h3 
+                                  className="font-medium hover:text-blue-600 cursor-pointer"
+                                  onClick={() => {
+                                    setSelectedDimension(dim.id);
+                                    loadClassificationResults(dim.id);
+                                  }}
+                                >
+                                  {dim.name}
+                                </h3>
+                                {isValidForMeta && (
+                                  <Badge variant="default" className="bg-green-500 text-xs">
+                                    可用于Meta
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {dim.totalClassified && dim.totalClassified > 0 && (
+                                  <Badge variant="outline" className="text-xs">
+                                    {dim.totalClassified} 篇
+                                  </Badge>
+                                )}
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    deleteDimension(dim.id);
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4 text-slate-400 hover:text-red-500" />
+                                </Button>
+                              </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                              {dim.totalClassified && dim.totalClassified > 0 && (
-                                <Badge variant="outline" className="text-xs">
-                                  {dim.totalClassified} 篇
-                                </Badge>
-                              )}
-                              <Button 
-                                variant="ghost" 
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  deleteDimension(dim.id);
-                                }}
-                              >
-                                <Trash2 className="h-4 w-4 text-slate-400 hover:text-red-500" />
-                              </Button>
-                            </div>
-                          </div>
                           
                           {/* 数据可获得性标识 */}
                           {dim.dataAvailability && (
@@ -2096,6 +2250,7 @@ export default function Home() {
                       </Card>
                       );
                     })}
+                  </div>
                   </div>
 
                   {/* 分类操作区 */}
@@ -2770,10 +2925,11 @@ export default function Home() {
                       </TableBody>
                     </Table>
                   )}
-                </CardContent>
-              </Card>
+              </CardContent>
+            </Card>
+            </div>
 
-              {/* 对比结果对话框 */}
+            {/* 对比结果对话框 */}
               <Dialog open={showCompare} onOpenChange={setShowCompare}>
                 <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
                   <DialogHeader>
@@ -2921,7 +3077,6 @@ export default function Home() {
                   )}
                 </DialogContent>
               </Dialog>
-            </div>
           </TabsContent>
 
           <TabsContent value="quality">
