@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { S3Storage } from 'coze-coding-dev-sdk';
-import * as pdfParse from 'pdf-parse';
+// @ts-ignore
+import * as pdfjs from 'pdfjs-dist';
+
+// 配置 pdfjs worker（Node.js 环境不需要 worker）
+if (typeof (pdfjs as any).GlobalWorkerOptions !== 'undefined') {
+  (pdfjs as any).GlobalWorkerOptions.workerSrc = '';
+}
 
 // 初始化存储
 const storage = new S3Storage({
@@ -22,9 +28,28 @@ async function extractPdfMetadata(buffer: Buffer): Promise<{
   abstract?: string;
 }> {
   try {
-    const data = await (pdfParse as any).default(buffer, { max: 3 }); // 只解析前3页
-    const text = data.text || '';
-    const firstPage = text.split('\f')[0] || text; // 第一页内容
+    // 使用 pdfjs-dist 解析 PDF
+    const loadingTask = (pdfjs as any).getDocument({
+      data: new Uint8Array(buffer),
+      useSystemFonts: true,
+    });
+    
+    const pdfDocument = await loadingTask.promise;
+    
+    // 只读取前3页
+    const maxPages = Math.min(3, pdfDocument.numPages);
+    let text = '';
+    
+    for (let i = 1; i <= maxPages; i++) {
+      const page = await pdfDocument.getPage(i);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items
+        .map((item: any) => item.str)
+        .join(' ');
+      text += pageText + '\n';
+    }
+    
+    const firstPage = text.split('\n')[0] || text; // 第一页内容
     
     console.log('[PDF Metadata] First page length:', firstPage.length);
     
