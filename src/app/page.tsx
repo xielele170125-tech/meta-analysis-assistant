@@ -194,6 +194,11 @@ export default function Home() {
   const [literature, setLiterature] = useState<Literature[]>([]);
   const [uploading, setUploading] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [batchUploadProgress, setBatchUploadProgress] = useState<{
+    total: number;
+    completed: number;
+    current: string;
+  } | null>(null);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [showImportResult, setShowImportResult] = useState(false);
   const [autoDownloadPdf, setAutoDownloadPdf] = useState(true);
@@ -321,63 +326,83 @@ export default function Home() {
     }
   };
 
-  // 上传单个PDF文献（异步处理）
+  // 批量上传PDF文献（异步处理）
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !apiKey) return;
+    const files = e.target.files;
+    if (!files || files.length === 0 || !apiKey) return;
 
+    const fileList = Array.from(files);
+    const total = fileList.length;
+    
     setUploading(true);
-    try {
-      // 1. 上传文件到对象存储
-      const formData = new FormData();
-      formData.append('file', file);
-      const uploadRes = await fetch('/api/literature/upload', { method: 'POST', body: formData });
-      const uploadData = await uploadRes.json();
-      if (!uploadData.success) throw new Error(uploadData.error);
+    setBatchUploadProgress({ total, completed: 0, current: '' });
 
-      // 2. 创建文献记录（状态为 pending）
-      const createRes = await fetch('/api/literature', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: file.name.replace(/\.[^/.]+$/, ''),
-          fileName: uploadData.data.fileName,
-          fileKey: uploadData.data.fileKey,
-        }),
-      });
-      const createData = await createRes.json();
-      if (!createData.success) throw new Error(createData.error);
+    let successCount = 0;
+    let failCount = 0;
 
-      // 立即刷新文献列表，显示新文献
-      await loadLiterature();
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i];
+      setBatchUploadProgress({ total, completed: i, current: file.name });
       
-      // 3. 异步处理（不等待完成）
-      fetch('/api/literature/process', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          literatureId: createData.data.id,
-          fileUrl: uploadData.data.fileUrl,
-          apiKey: apiKey,
-        }),
-      }).then(async (res) => {
-        // 处理完成后刷新数据
-        await loadLiterature();
-        await loadExtractedData();
-      }).catch((error) => {
-        console.error('Process error:', error);
-      });
+      try {
+        // 1. 上传文件到对象存储
+        const formData = new FormData();
+        formData.append('file', file);
+        const uploadRes = await fetch('/api/literature/upload', { method: 'POST', body: formData });
+        const uploadData = await uploadRes.json();
+        if (!uploadData.success) throw new Error(uploadData.error);
 
-      // 立即返回，不等待处理完成
-      alert('文件已上传，正在后台处理中...');
-    } catch (error) {
-      console.error('Upload error:', error);
-      alert(error instanceof Error ? error.message : '上传失败');
-    } finally {
-      setUploading(false);
-      // 重置文件输入
-      e.target.value = '';
+        // 2. 创建文献记录（状态为 pending）
+        const createRes = await fetch('/api/literature', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: file.name.replace(/\.[^/.]+$/, ''),
+            fileName: uploadData.data.fileName,
+            fileKey: uploadData.data.fileKey,
+          }),
+        });
+        const createData = await createRes.json();
+        if (!createData.success) throw new Error(createData.error);
+
+        // 3. 异步处理（不等待完成）
+        fetch('/api/literature/process', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            literatureId: createData.data.id,
+            fileUrl: uploadData.data.fileUrl,
+            apiKey: apiKey,
+          }),
+        }).then(async (res) => {
+          await loadLiterature();
+          await loadExtractedData();
+        }).catch((error) => {
+          console.error('Process error:', error);
+        });
+
+        successCount++;
+      } catch (error) {
+        console.error(`Upload error for ${file.name}:`, error);
+        failCount++;
+      }
     }
+
+    // 刷新文献列表
+    await loadLiterature();
+    
+    setBatchUploadProgress({ total, completed: total, current: '' });
+    setUploading(false);
+    
+    // 显示结果
+    if (failCount === 0) {
+      alert(`成功上传 ${successCount} 个文件，正在后台处理中...`);
+    } else {
+      alert(`上传完成：成功 ${successCount} 个，失败 ${failCount} 个`);
+    }
+    
+    // 重置文件输入
+    e.target.value = '';
   };
 
   // 导入EndNote文件
@@ -972,7 +997,7 @@ export default function Home() {
                       {importing ? '导入中...' : '导入EndNote'}
                     </Button>
                     {/* 上传PDF按钮 */}
-                    <input type="file" id="file-upload" className="hidden" accept=".pdf,.doc,.docx" onChange={handleUpload} disabled={uploading} />
+                    <input type="file" id="file-upload" className="hidden" accept=".pdf,.doc,.docx" onChange={handleUpload} disabled={uploading} multiple />
                     <Button 
                       onClick={() => {
                         if (!apiKey) {
@@ -985,8 +1010,16 @@ export default function Home() {
                       disabled={uploading}
                     >
                       {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileUp className="mr-2 h-4 w-4" />}
-                      {uploading ? '上传中...' : '上传PDF'}
+                      {uploading && batchUploadProgress 
+                        ? `上传中 (${batchUploadProgress.completed}/${batchUploadProgress.total})...` 
+                        : '批量上传PDF'}
                     </Button>
+                    {/* 批量上传进度提示 */}
+                    {uploading && batchUploadProgress && (
+                      <div className="flex items-center gap-2 text-sm text-slate-600">
+                        <span>正在上传: {batchUploadProgress.current}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </CardHeader>
