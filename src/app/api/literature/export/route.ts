@@ -4,6 +4,27 @@ import { getSupabaseClient } from '@/storage/database/supabase-client';
 const client = getSupabaseClient();
 
 /**
+ * 从 raw_content 提取 abstract 和 keywords
+ */
+function extractFromRawContent(rawContent: string | null): { abstract: string; keywords: string[] } {
+  if (!rawContent) {
+    return { abstract: '', keywords: [] };
+  }
+  
+  try {
+    const parsed = JSON.parse(rawContent);
+    const abstract = parsed.abstract || '';
+    const keywords = Array.isArray(parsed.keywords) 
+      ? parsed.keywords 
+      : (parsed.keywords ? parsed.keywords.split(/[,;]/) : []);
+    return { abstract, keywords };
+  } catch {
+    // 如果不是 JSON，可能是纯文本摘要
+    return { abstract: rawContent.substring(0, 5000), keywords: [] };
+  }
+}
+
+/**
  * 导出文献为 EndNote (RIS) 格式
  * GET /api/literature/export
  */
@@ -15,11 +36,10 @@ export async function GET(request: NextRequest) {
     const dimensionId = searchParams.get('dimensionId');
     const category = searchParams.get('category');
 
-    // 构建查询
+    // 构建查询（使用 raw_content 替代 abstract/keywords）
     let query = client
       .from('literature')
-      .select('id, title, authors, year, doi, journal, volume, issue, pages, abstract, keywords')
-      .eq('status', 'completed');
+      .select('id, title, authors, year, doi, journal, volume, issue, pages, raw_content');
 
     // 按ID筛选
     if (literatureIds.length > 0) {
@@ -89,6 +109,9 @@ export async function GET(request: NextRequest) {
  */
 function generateRis(literature: any[]): string {
   const risEntries = literature.map((lit) => {
+    // 从 raw_content 提取摘要和关键词
+    const { abstract, keywords } = extractFromRawContent(lit.raw_content);
+    
     const lines: string[] = [];
 
     // 类型
@@ -144,13 +167,12 @@ function generateRis(literature: any[]): string {
     }
 
     // 摘要
-    if (lit.abstract) {
-      lines.push(`AB  - ${lit.abstract.substring(0, 5000)}`);
+    if (abstract) {
+      lines.push(`AB  - ${abstract.substring(0, 5000)}`);
     }
 
     // 关键词
-    if (lit.keywords) {
-      const keywords = Array.isArray(lit.keywords) ? lit.keywords : lit.keywords.split(/[,;]/);
+    if (keywords && keywords.length > 0) {
       keywords.forEach((kw: string) => {
         const trimmed = kw.trim();
         if (trimmed) {
@@ -173,6 +195,9 @@ function generateRis(literature: any[]): string {
  */
 function generateXml(literature: any[]): string {
   const xmlRecords = literature.map((lit) => {
+    // 从 raw_content 提取摘要和关键词
+    const { abstract, keywords } = extractFromRawContent(lit.raw_content);
+    
     const authorsXml = lit.authors
       ? lit.authors
           .split(/[,;]|\s+and\s+/i)
@@ -181,8 +206,8 @@ function generateXml(literature: any[]): string {
           .join('\n')
       : '';
 
-    const keywordsXml = lit.keywords
-      ? (Array.isArray(lit.keywords) ? lit.keywords : lit.keywords.split(/[,;]/))
+    const keywordsXml = keywords && keywords.length > 0
+      ? keywords
           .filter((kw: string) => kw.trim())
           .map((kw: string) => `    <keyword>${escapeXml(kw.trim())}</keyword>`)
           .join('\n')
@@ -198,7 +223,7 @@ ${authorsXml}
     <issue>${lit.issue || ''}</issue>
     <pages>${lit.pages || ''}</pages>
     <doi>${escapeXml(lit.doi || '')}</doi>
-    <abstract>${escapeXml(lit.abstract?.substring(0, 5000) || '')}</abstract>
+    <abstract>${escapeXml(abstract.substring(0, 5000) || '')}</abstract>
 ${keywordsXml}
   </record>`;
   });

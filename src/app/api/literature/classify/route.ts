@@ -142,11 +142,10 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '分类维度不存在' }, { status: 404 });
       }
 
-      // 获取待分类的文献
+      // 获取待分类的文献（不限制状态，只要有内容就行）
       let query = client
         .from('literature')
-        .select('id, title, abstract, raw_content, authors, year, doi')
-        .eq('status', 'completed');
+        .select('id, title, raw_content, authors, year, doi, journal');
 
       if (literatureIds && literatureIds.length > 0) {
         query = query.in('id', literatureIds);
@@ -154,14 +153,38 @@ export async function POST(request: NextRequest) {
 
       const { data: literatureList, error: litError } = await query;
 
-      if (litError) throw litError;
+      if (litError) {
+        console.error('[Classify] Query error:', litError);
+        throw litError;
+      }
+
+      // 过滤出有标题的文献
+      const validLiterature = (literatureList || []).filter(lit => lit.title);
+
+      if (validLiterature.length === 0) {
+        return NextResponse.json({ 
+          error: '没有可分类的文献，请先导入文献', 
+          classified: 0 
+        }, { status: 400 });
+      }
+
+      console.log(`[Classify] Found ${validLiterature.length} literature for classification`);
 
       // 逐个分类
       const results = [];
-      for (const lit of literatureList || []) {
+      for (const lit of validLiterature) {
         try {
-          // 使用标题、摘要或全文内容
-          const content = lit.raw_content || lit.abstract || '';
+          // 从 raw_content 解析内容
+          let content = '';
+          if (lit.raw_content) {
+            try {
+              const raw = JSON.parse(lit.raw_content);
+              content = raw.abstract || lit.raw_content;
+            } catch {
+              content = lit.raw_content;
+            }
+          }
+          
           const title = lit.title || '';
 
           if (!title && !content) {
@@ -227,11 +250,10 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '请提供研究问题' }, { status: 400 });
       }
 
-      // 获取文献列表
+      // 获取文献列表（不限制状态，只要有标题就行）
       let query = client
         .from('literature')
-        .select('id, title, abstract, authors, year, keywords')
-        .eq('status', 'completed');
+        .select('id, title, raw_content, authors, year, doi, journal');
 
       if (literatureIds && literatureIds.length > 0) {
         query = query.in('id', literatureIds);
@@ -239,17 +261,25 @@ export async function POST(request: NextRequest) {
 
       const { data: literatureList, error: litError } = await query;
 
-      if (litError) throw litError;
-
-      if (!literatureList || literatureList.length === 0) {
-        return NextResponse.json({ error: '没有可分析的文献' }, { status: 400 });
+      if (litError) {
+        console.error('[Recommend] Query error:', litError);
+        throw litError;
       }
+
+      // 过滤出有标题的文献
+      const validLiterature = (literatureList || []).filter(lit => lit.title);
+
+      if (validLiterature.length === 0) {
+        return NextResponse.json({ error: '没有可分析的文献，请先导入文献' }, { status: 400 });
+      }
+
+      console.log(`[Recommend] Found ${validLiterature.length} literature for analysis`);
 
       // 调用AI推荐维度
       const recommendations = await recommendDimensions(
         apiKey,
         researchQuestion,
-        literatureList
+        validLiterature
       );
 
       return NextResponse.json({
@@ -387,10 +417,11 @@ async function recommendDimensions(
   literatureList: Array<{
     id: string;
     title?: string;
-    abstract?: string;
+    raw_content?: string;
     authors?: string;
     year?: number;
-    keywords?: string | string[];
+    doi?: string;
+    journal?: string;
   }>
 ): Promise<Array<{
   name: string;
@@ -403,13 +434,29 @@ async function recommendDimensions(
   const literatureSummaries = literatureList
     .slice(0, 30) // 最多分析30篇
     .map((lit, idx) => {
-      const keywords = Array.isArray(lit.keywords) 
-        ? lit.keywords.join(', ') 
-        : lit.keywords || '';
+      // 从 raw_content 中提取摘要和关键词
+      let abstract = '';
+      let keywords = '';
+      
+      if (lit.raw_content) {
+        try {
+          const raw = JSON.parse(lit.raw_content);
+          abstract = raw.abstract || '';
+          keywords = Array.isArray(raw.keywords) 
+            ? raw.keywords.join(', ') 
+            : (raw.keywords || '');
+        } catch {
+          // 如果解析失败，直接使用 raw_content
+          abstract = lit.raw_content.substring(0, 500);
+        }
+      }
+      
       return `[${idx + 1}] 标题: ${lit.title || '未知'}
     作者: ${lit.authors || '未知'} (${lit.year || '未知年份'})
+    期刊: ${lit.journal || '未知'}
+    DOI: ${lit.doi || '无'}
     关键词: ${keywords}
-    摘要: ${(lit.abstract || '').substring(0, 500)}`;
+    摘要: ${abstract.substring(0, 500)}`;
     })
     .join('\n\n');
 
@@ -475,16 +522,22 @@ ${literatureSummaries}
   });
 
   if (!response.ok) {
-    throw new Error(`DeepSeek API error: ${response.status}`);
+    const errorText = await response.text();
+    console.error('[Recommend] DeepSeek API error:', response.status, errorText);
+    throw new Error(`DeepSeek API error: ${response.status} - ${errorText}`);
   }
 
   const data = await response.json();
   const content_text = data.choices[0]?.message?.content || '{"dimensions":[]}';
+  
+  console.log('[Recommend] DeepSeek response:', content_text.substring(0, 500));
 
   try {
     const result = JSON.parse(content_text);
+    console.log('[Recommend] Parsed dimensions:', result.dimensions?.length || 0);
     return result.dimensions || [];
-  } catch {
+  } catch (parseError) {
+    console.error('[Recommend] Failed to parse response:', parseError);
     return [];
   }
 }
