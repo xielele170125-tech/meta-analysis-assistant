@@ -36,6 +36,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet, Code2, TriangleAlert, TrendingUp, Search, GitCompare, Info, RefreshCw, ClipboardCheck, Star, AlertTriangle, CheckCircle2, Layers, FolderTree, Plus, X, Lightbulb, Sparkles, Clipboard, FileDigit, ChevronDown, Play, Network } from 'lucide-react';
 import QualityAssessmentTable from '@/components/QualityAssessmentTable';
 import NetworkAnalysisTab from '@/components/NetworkAnalysisTab';
+import DimensionDataFilter from '@/components/DimensionDataFilter';
 
 // 类型定义
 interface Literature {
@@ -2730,6 +2731,22 @@ export default function Home() {
 
           <TabsContent value="compare">
             <div className="space-y-6">
+              {/* 分类维度筛选器 */}
+              <DimensionDataFilter
+                dimensions={classificationDimensions}
+                extractedStudies={extractedStudies}
+                onFilterChange={(filtered, dimensionId, category) => {
+                  if (dimensionId && category) {
+                    // 当使用分类维度筛选时，更新显示的数据
+                    console.log(`筛选维度: ${dimensionId}, 分类: ${category}, 数据: ${filtered.length}条`);
+                  }
+                }}
+                onCreateNetworkAnalysis={(analysisId, category, studies) => {
+                  // 创建网状分析后跳转到网状分析页面
+                  setActiveTab('network');
+                }}
+              />
+              
               {/* 搜索和筛选区域 */}
               <Card>
                 <CardHeader>
@@ -3181,6 +3198,7 @@ export default function Home() {
             <NetworkAnalysisTab 
               apiKey={apiKey} 
               extractedStudies={extractedStudies}
+              classificationDimensions={classificationDimensions}
             />
           </TabsContent>
         </Tabs>

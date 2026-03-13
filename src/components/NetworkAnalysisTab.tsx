@@ -45,6 +45,8 @@ import {
   AlertTriangle,
   CheckCircle,
   Info,
+  Layers,
+  Sparkles,
 } from 'lucide-react';
 import NetworkPlot from './NetworkPlot';
 import RankingPlot from './RankingPlot';
@@ -149,11 +151,19 @@ interface NetworkAnalysisTabProps {
     outcome_type: string | null;
     study_name: string | null;
   }>;
+  // 分类维度相关
+  classificationDimensions?: Array<{
+    id: string;
+    name: string;
+    description?: string;
+    categories: string[];
+  }>;
 }
 
 export default function NetworkAnalysisTab({
   apiKey,
   extractedStudies,
+  classificationDimensions = [],
 }: NetworkAnalysisTabProps) {
   // 状态
   const [analyses, setAnalyses] = useState<NetworkMetaAnalysis[]>([]);
@@ -161,6 +171,7 @@ export default function NetworkAnalysisTab({
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [showDimensionDialog, setShowDimensionDialog] = useState(false);
   const [addingData, setAddingData] = useState(false);
   const [calculating, setCalculating] = useState(false);
 
@@ -172,6 +183,22 @@ export default function NetworkAnalysisTab({
     effectMeasure: 'OR',
     modelType: 'random',
   });
+
+  // 从分类维度创建分析
+  const [dimensionForm, setDimensionForm] = useState({
+    dimensionId: '',
+    category: '',
+    name: '',
+    description: '',
+  });
+  const [selectedDimensionCategories, setSelectedDimensionCategories] = useState<string[]>([]);
+  const [dimensionRecommendation, setDimensionRecommendation] = useState<{
+    outcomeType: string;
+    effectMeasure: string;
+    modelType: string;
+    reasoning: string;
+  } | null>(null);
+  const [loadingDimensionData, setLoadingDimensionData] = useState(false);
 
   // 添加干预措施表单
   const [newIntervention, setNewIntervention] = useState({ name: '', description: '' });
@@ -390,6 +417,60 @@ export default function NetworkAnalysisTab({
     }
   };
 
+  // 从分类维度创建分析
+  const handleDimensionChange = (dimensionId: string) => {
+    const dimension = classificationDimensions.find(d => d.id === dimensionId);
+    if (dimension) {
+      setSelectedDimensionCategories(dimension.categories);
+      setDimensionForm(prev => ({
+        ...prev,
+        dimensionId,
+        category: '',
+        name: dimension.name,
+      }));
+    }
+  };
+
+  const handleCreateFromDimension = async () => {
+    if (!dimensionForm.dimensionId || !dimensionForm.category || !dimensionForm.name) {
+      alert('请选择分类维度和分类');
+      return;
+    }
+
+    setCreating(true);
+    try {
+      const res = await fetch('/api/network-meta/dimension', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create-from-dimension',
+          dimensionId: dimensionForm.dimensionId,
+          category: dimensionForm.category,
+          name: dimensionForm.name,
+          description: dimensionForm.description,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setShowDimensionDialog(false);
+        setDimensionForm({
+          dimensionId: '',
+          category: '',
+          name: '',
+          description: '',
+        });
+        loadAnalyses();
+      } else {
+        alert('创建失败: ' + data.error);
+      }
+    } catch (error) {
+      console.error('Create from dimension error:', error);
+      alert('创建失败');
+    } finally {
+      setCreating(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* 顶部操作栏 */}
@@ -400,10 +481,18 @@ export default function NetworkAnalysisTab({
             支持多臂试验、间接比较、SUCRA排名、一致性检验
           </p>
         </div>
-        <Button onClick={() => setShowCreateDialog(true)}>
-          <Plus className="h-4 w-4 mr-2" />
-          新建分析
-        </Button>
+        <div className="flex gap-2">
+          {classificationDimensions.length > 0 && (
+            <Button variant="outline" onClick={() => setShowDimensionDialog(true)}>
+              <Layers className="h-4 w-4 mr-2" />
+              从分类维度创建
+            </Button>
+          )}
+          <Button onClick={() => setShowCreateDialog(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            新建分析
+          </Button>
+        </div>
       </div>
 
       {/* 分析列表 */}
@@ -568,6 +657,113 @@ export default function NetworkAnalysisTab({
             <Button onClick={handleCreate} disabled={creating}>
               {creating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               创建
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 从分类维度创建分析对话框 */}
+      <Dialog open={showDimensionDialog} onOpenChange={setShowDimensionDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Layers className="h-5 w-5" />
+              从分类维度创建分析
+            </DialogTitle>
+            <DialogDescription>
+              选择分类维度和分类，系统将自动导入相关数据并推荐分析参数
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <Label>分类维度 *</Label>
+              <Select
+                value={dimensionForm.dimensionId}
+                onValueChange={handleDimensionChange}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="选择分类维度" />
+                </SelectTrigger>
+                <SelectContent>
+                  {classificationDimensions.map((dim) => (
+                    <SelectItem key={dim.id} value={dim.id}>
+                      {dim.name} ({dim.categories.length}个分类)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            {dimensionForm.dimensionId && (
+              <div>
+                <Label>选择分类 *</Label>
+                <Select
+                  value={dimensionForm.category}
+                  onValueChange={(v) => setDimensionForm(prev => ({ ...prev, category: v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择分类" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {selectedDimensionCategories.map((cat) => (
+                      <SelectItem key={cat} value={cat}>
+                        {cat}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div>
+              <Label>分析名称 *</Label>
+              <Input
+                value={dimensionForm.name}
+                onChange={(e) => setDimensionForm(prev => ({ ...prev, name: e.target.value }))}
+                placeholder="输入分析名称"
+              />
+            </div>
+
+            <div>
+              <Label>描述</Label>
+              <Textarea
+                value={dimensionForm.description}
+                onChange={(e) => setDimensionForm(prev => ({ ...prev, description: e.target.value }))}
+                placeholder="分析描述..."
+                rows={2}
+              />
+            </div>
+
+            {dimensionRecommendation && (
+              <div className="p-3 bg-blue-50 rounded-lg text-sm">
+                <p className="font-medium text-blue-700 flex items-center gap-1">
+                  <Info className="h-4 w-4" />
+                  AI推荐参数
+                </p>
+                <div className="flex gap-2 mt-2">
+                  <Badge variant="outline" className="text-xs">
+                    {dimensionRecommendation.effectMeasure}
+                  </Badge>
+                  <Badge variant="outline" className="text-xs">
+                    {dimensionRecommendation.modelType === 'random' ? '随机效应' : '固定效应'}
+                  </Badge>
+                </div>
+                <p className="text-xs text-blue-600 mt-2">
+                  {dimensionRecommendation.reasoning}
+                </p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDimensionDialog(false)}>
+              取消
+            </Button>
+            <Button
+              onClick={handleCreateFromDimension}
+              disabled={creating || !dimensionForm.dimensionId || !dimensionForm.category || !dimensionForm.name}
+            >
+              {creating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              创建分析
             </Button>
           </DialogFooter>
         </DialogContent>
