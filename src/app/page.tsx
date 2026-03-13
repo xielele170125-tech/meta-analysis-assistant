@@ -586,6 +586,7 @@ export default function Home() {
     contrastValue?: string;
   }>>([]);
   const [showRecommendDialog, setShowRecommendDialog] = useState(false);
+  const [selectedRecommendIndices, setSelectedRecommendIndices] = useState<number[]>([]);
 
   const recommendDimensions = async () => {
     if (!researchQuestion.trim()) {
@@ -640,6 +641,7 @@ export default function Home() {
       if (data.success) {
         setShowRecommendDialog(false);
         setRecommendedDimensions([]);
+        setSelectedRecommendIndices([]);
         setResearchQuestion('');
         // 重新加载维度列表
         fetch('/api/literature/classify?action=dimensions')
@@ -3306,7 +3308,13 @@ export default function Home() {
       </Dialog>
 
       {/* AI推荐维度对话框 */}
-      <Dialog open={showRecommendDialog} onOpenChange={setShowRecommendDialog}>
+      <Dialog open={showRecommendDialog} onOpenChange={(open) => {
+        setShowRecommendDialog(open);
+        if (open && recommendedDimensions.length > 0) {
+          // 打开时默认全选
+          setSelectedRecommendIndices(recommendedDimensions.map((_, i) => i));
+        }
+      }}>
         <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -3314,86 +3322,152 @@ export default function Home() {
               AI推荐的分类维度
             </DialogTitle>
             <DialogDescription>
-              根据研究问题「{researchQuestion}」和文献内容，AI推荐以下分类维度
+              根据研究问题「{researchQuestion}」和文献内容，AI推荐以下分类维度。
+              请勾选需要采纳的维度。
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          
+          {/* 全选/取消全选 */}
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="select-all"
+                checked={selectedRecommendIndices.length === recommendedDimensions.length}
+                onCheckedChange={(checked) => {
+                  if (checked) {
+                    setSelectedRecommendIndices(recommendedDimensions.map((_, i) => i));
+                  } else {
+                    setSelectedRecommendIndices([]);
+                  }
+                }}
+              />
+              <Label htmlFor="select-all" className="text-sm cursor-pointer">
+                全选 ({recommendedDimensions.length} 个维度)
+              </Label>
+            </div>
+            <span className="text-sm text-slate-500">
+              已选中 {selectedRecommendIndices.length} 个
+            </span>
+          </div>
+          
+          <div className="space-y-3 py-2">
             {recommendedDimensions.map((dim, idx) => {
               const hasEnoughCategories = dim.categories.length >= 2;
+              const isSelected = selectedRecommendIndices.includes(idx);
+              
               return (
-              <div key={idx} className={`border rounded-lg p-4 ${
-                hasEnoughCategories && dim.dataAvailability !== '信息不足'
-                  ? 'border-green-200 bg-green-50/30' 
-                  : ''
-              }`}>
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <h4 className="font-medium">{dim.name}</h4>
-                    {hasEnoughCategories && dim.dataAvailability === '有明确数据' && (
-                      <Badge variant="default" className="bg-green-500 text-xs">
-                        ✓ 有数据
+              <div 
+                key={idx} 
+                className={`border rounded-lg p-4 transition-all cursor-pointer ${
+                  isSelected 
+                    ? 'border-blue-500 bg-blue-50/50 ring-1 ring-blue-500' 
+                    : 'hover:border-slate-300'
+                } ${
+                  hasEnoughCategories && dim.dataAvailability !== '信息不足'
+                    ? 'border-green-200' 
+                    : ''
+                }`}
+                onClick={() => {
+                  if (isSelected) {
+                    setSelectedRecommendIndices(prev => prev.filter(i => i !== idx));
+                  } else {
+                    setSelectedRecommendIndices(prev => [...prev, idx]);
+                  }
+                }}
+              >
+                <div className="flex items-start gap-3">
+                  {/* 复选框 */}
+                  <Checkbox
+                    id={`dim-${idx}`}
+                    checked={isSelected}
+                    onCheckedChange={() => {
+                      // 点击复选框也会触发
+                    }}
+                    className="mt-1"
+                  />
+                  
+                  <div className="flex-1">
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-medium">{dim.name}</h4>
+                        {hasEnoughCategories && dim.dataAvailability === '有明确数据' && (
+                          <Badge variant="default" className="bg-green-500 text-xs">
+                            ✓ 有数据
+                          </Badge>
+                        )}
+                        {dim.dataAvailability === '可能有数据' && (
+                          <Badge variant="secondary" className="text-xs">
+                            ? 可能有数据
+                          </Badge>
+                        )}
+                      </div>
+                      <Badge variant="outline">
+                        约 {dim.literatureCount} 篇可分类
                       </Badge>
+                    </div>
+                    
+                    {/* 数据可获得性 */}
+                    {dim.dataAvailability && (
+                      <div className={`text-xs mb-2 px-2 py-1 rounded inline-block ${
+                        dim.dataAvailability === '有明确数据' 
+                          ? 'bg-green-100 text-green-700' 
+                          : dim.dataAvailability === '可能有数据'
+                          ? 'bg-amber-100 text-amber-700'
+                          : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        📊 数据：{dim.dataAvailability}
+                      </div>
                     )}
-                    {dim.dataAvailability === '可能有数据' && (
-                      <Badge variant="secondary" className="text-xs">
-                        ? 可能有数据
-                      </Badge>
+                    
+                    <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">
+                      {dim.description}
+                    </p>
+                    
+                    {/* 对照价值 */}
+                    {dim.contrastValue && (
+                      <p className="text-xs text-blue-600 mb-2 bg-blue-50 px-2 py-1 rounded">
+                        💡 对照价值：{dim.contrastValue}
+                      </p>
                     )}
+                    
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {dim.categories.map((cat, catIdx) => (
+                        <Badge key={catIdx} variant="outline" className="text-xs">
+                          {cat}
+                        </Badge>
+                      ))}
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      <strong>推荐理由：</strong>{dim.rationale}
+                    </p>
                   </div>
-                  <Badge variant="outline">
-                    约 {dim.literatureCount} 篇可分类
-                  </Badge>
                 </div>
-                
-                {/* 数据可获得性 */}
-                {dim.dataAvailability && (
-                  <div className={`text-xs mb-2 px-2 py-1 rounded inline-block ${
-                    dim.dataAvailability === '有明确数据' 
-                      ? 'bg-green-100 text-green-700' 
-                      : dim.dataAvailability === '可能有数据'
-                      ? 'bg-amber-100 text-amber-700'
-                      : 'bg-slate-100 text-slate-600'
-                  }`}>
-                    📊 数据：{dim.dataAvailability}
-                  </div>
-                )}
-                
-                <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">
-                  {dim.description}
-                </p>
-                
-                {/* 对照价值 */}
-                {dim.contrastValue && (
-                  <p className="text-xs text-blue-600 mb-2 bg-blue-50 px-2 py-1 rounded">
-                    💡 对照价值：{dim.contrastValue}
-                  </p>
-                )}
-                
-                <div className="flex flex-wrap gap-1 mb-2">
-                  {dim.categories.map((cat, catIdx) => (
-                    <Badge key={catIdx} variant="outline" className="text-xs">
-                      {cat}
-                    </Badge>
-                  ))}
-                </div>
-                <p className="text-xs text-slate-500">
-                  <strong>推荐理由：</strong>{dim.rationale}
-                </p>
               </div>
               );
             })}
           </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setShowRecommendDialog(false)}>
-              取消
-            </Button>
-            <Button onClick={() => {
-              // 采纳所有推荐
-              adoptRecommendedDimensions(recommendedDimensions.map((_, i) => i));
-            }}>
-              <Plus className="mr-2 h-4 w-4" />
-              采纳全部推荐
-            </Button>
+          <div className="flex justify-between items-center pt-2 border-t">
+            <p className="text-sm text-slate-500">
+              将采纳 {selectedRecommendIndices.length} 个分类维度
+            </p>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setShowRecommendDialog(false)}>
+                取消
+              </Button>
+              <Button 
+                onClick={() => {
+                  if (selectedRecommendIndices.length === 0) {
+                    alert('请至少选择一个分类维度');
+                    return;
+                  }
+                  adoptRecommendedDimensions(selectedRecommendIndices);
+                }}
+                disabled={selectedRecommendIndices.length === 0}
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                采纳选中项 ({selectedRecommendIndices.length})
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
