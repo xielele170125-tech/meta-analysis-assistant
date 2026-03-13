@@ -32,7 +32,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet, Code2, TriangleAlert, TrendingUp, Search, GitCompare, Info, RefreshCw, ClipboardCheck, Star, AlertTriangle, CheckCircle2, Layers, FolderTree, Plus, X } from 'lucide-react';
+import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet, Code2, TriangleAlert, TrendingUp, Search, GitCompare, Info, RefreshCw, ClipboardCheck, Star, AlertTriangle, CheckCircle2, Layers, FolderTree, Plus, X, Lightbulb, Sparkles } from 'lucide-react';
 import QualityAssessmentTable from '@/components/QualityAssessmentTable';
 
 // 类型定义
@@ -508,6 +508,86 @@ export default function Home() {
       a.download = 'literature.ris';
       a.click();
       window.URL.revokeObjectURL(url);
+    }
+  };
+
+  // AI推荐分类维度
+  const [researchQuestion, setResearchQuestion] = useState('');
+  const [recommendingDimensions, setRecommendingDimensions] = useState(false);
+  const [recommendedDimensions, setRecommendedDimensions] = useState<Array<{
+    name: string;
+    description: string;
+    categories: string[];
+    rationale: string;
+    literatureCount: number;
+  }>>([]);
+  const [showRecommendDialog, setShowRecommendDialog] = useState(false);
+
+  const recommendDimensions = async () => {
+    if (!researchQuestion.trim()) {
+      alert('请输入研究问题');
+      return;
+    }
+    if (!apiKey) {
+      alert('请先配置 DeepSeek API Key');
+      return;
+    }
+
+    setRecommendingDimensions(true);
+    try {
+      const res = await fetch('/api/literature/classify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'recommend_dimensions',
+          researchQuestion,
+          apiKey,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setRecommendedDimensions(data.data);
+        setShowRecommendDialog(true);
+      } else {
+        alert('推荐失败: ' + data.error);
+      }
+    } catch (error) {
+      console.error('Recommend dimensions error:', error);
+      alert('推荐失败');
+    } finally {
+      setRecommendingDimensions(false);
+    }
+  };
+
+  // 采纳推荐的维度
+  const adoptRecommendedDimensions = async (selectedIndices: number[]) => {
+    const selectedDims = selectedIndices.map(i => recommendedDimensions[i]);
+    
+    try {
+      const res = await fetch('/api/literature/classify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'adopt_recommendations',
+          dimensions: selectedDims,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setShowRecommendDialog(false);
+        setRecommendedDimensions([]);
+        setResearchQuestion('');
+        // 重新加载维度列表
+        fetch('/api/literature/classify?action=dimensions')
+          .then(res => res.json())
+          .then(d => {
+            if (d.success) setClassificationDimensions(d.data);
+          });
+        alert(`成功创建 ${data.data.length} 个分类维度`);
+      }
+    } catch (error) {
+      console.error('Adopt recommendations error:', error);
+      alert('采纳失败');
     }
   };
 
@@ -1697,6 +1777,48 @@ export default function Home() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-6">
+                  {/* AI推荐分类维度 */}
+                  <div className="border rounded-lg p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20">
+                    <div className="flex items-start gap-4">
+                      <div className="flex-1">
+                        <h3 className="font-medium mb-2 flex items-center gap-2">
+                          <Brain className="h-5 w-5 text-blue-500" />
+                          AI智能推荐分类维度
+                        </h3>
+                        <p className="text-sm text-slate-600 dark:text-slate-400 mb-3">
+                          输入您的研究问题，AI将分析文献内容并推荐适合的亚组分析维度
+                        </p>
+                        <div className="flex gap-2">
+                          <Input
+                            placeholder="如：PGT技术对活产率的影响"
+                            value={researchQuestion}
+                            onChange={(e) => setResearchQuestion(e.target.value)}
+                            className="flex-1"
+                          />
+                          <Button 
+                            onClick={recommendDimensions}
+                            disabled={recommendingDimensions || !apiKey}
+                          >
+                            {recommendingDimensions ? (
+                              <>
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                分析中...
+                              </>
+                            ) : (
+                              <>
+                                <Lightbulb className="mr-2 h-4 w-4" />
+                                AI推荐
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                        {!apiKey && (
+                          <p className="text-xs text-amber-600 mt-2">请先在设置中配置 DeepSeek API Key</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
                   {/* 分类维度选择 */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {classificationDimensions.map((dim) => (
@@ -2565,6 +2687,58 @@ export default function Home() {
       </Dialog>
 
       {/* PDF关联选择对话框 */}
+      {/* AI推荐维度对话框 */}
+      <Dialog open={showRecommendDialog} onOpenChange={setShowRecommendDialog}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-yellow-500" />
+              AI推荐的分类维度
+            </DialogTitle>
+            <DialogDescription>
+              根据研究问题「{researchQuestion}」和文献内容，AI推荐以下分类维度
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {recommendedDimensions.map((dim, idx) => (
+              <div key={idx} className="border rounded-lg p-4 hover:bg-slate-50 dark:hover:bg-slate-800">
+                <div className="flex items-start justify-between mb-2">
+                  <h4 className="font-medium">{dim.name}</h4>
+                  <Badge variant="secondary">
+                    约 {dim.literatureCount} 篇可分类
+                  </Badge>
+                </div>
+                <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">
+                  {dim.description}
+                </p>
+                <div className="flex flex-wrap gap-1 mb-2">
+                  {dim.categories.map((cat, catIdx) => (
+                    <Badge key={catIdx} variant="outline" className="text-xs">
+                      {cat}
+                    </Badge>
+                  ))}
+                </div>
+                <p className="text-xs text-slate-500">
+                  <strong>推荐理由：</strong>{dim.rationale}
+                </p>
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setShowRecommendDialog(false)}>
+              取消
+            </Button>
+            <Button onClick={() => {
+              // 采纳所有推荐
+              adoptRecommendedDimensions(recommendedDimensions.map((_, i) => i));
+            }}>
+              <Plus className="mr-2 h-4 w-4" />
+              采纳全部推荐
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* 新建分类维度对话框 */}
       <Dialog open={showNewDimensionDialog} onOpenChange={setShowNewDimensionDialog}>
         <DialogContent className="max-w-lg">

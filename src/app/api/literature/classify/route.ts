@@ -215,6 +215,80 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // AI推荐分类维度
+    if (action === 'recommend_dimensions') {
+      const { researchQuestion, literatureIds } = body;
+
+      if (!apiKey) {
+        return NextResponse.json({ error: '请提供API Key' }, { status: 400 });
+      }
+
+      if (!researchQuestion) {
+        return NextResponse.json({ error: '请提供研究问题' }, { status: 400 });
+      }
+
+      // 获取文献列表
+      let query = client
+        .from('literature')
+        .select('id, title, abstract, authors, year, keywords')
+        .eq('status', 'completed');
+
+      if (literatureIds && literatureIds.length > 0) {
+        query = query.in('id', literatureIds);
+      }
+
+      const { data: literatureList, error: litError } = await query;
+
+      if (litError) throw litError;
+
+      if (!literatureList || literatureList.length === 0) {
+        return NextResponse.json({ error: '没有可分析的文献' }, { status: 400 });
+      }
+
+      // 调用AI推荐维度
+      const recommendations = await recommendDimensions(
+        apiKey,
+        researchQuestion,
+        literatureList
+      );
+
+      return NextResponse.json({
+        success: true,
+        data: recommendations,
+      });
+    }
+
+    // 批量采纳推荐维度
+    if (action === 'adopt_recommendations') {
+      const { dimensions } = body;
+
+      if (!dimensions || !Array.isArray(dimensions)) {
+        return NextResponse.json({ error: '请提供维度列表' }, { status: 400 });
+      }
+
+      const createdDimensions = [];
+      for (const dim of dimensions) {
+        const { data, error } = await client
+          .from('classification_dimensions')
+          .insert({
+            name: dim.name,
+            description: dim.description,
+            categories: dim.categories,
+          })
+          .select()
+          .single();
+
+        if (!error && data) {
+          createdDimensions.push(data);
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        data: createdDimensions,
+      });
+    }
+
     return NextResponse.json({ error: '无效的action参数' }, { status: 400 });
   } catch (error) {
     console.error('Classification POST error:', error);
@@ -301,5 +375,116 @@ ${content.substring(0, 3000)}
       confidence: 0,
       evidence: '',
     };
+  }
+}
+
+/**
+ * 使用AI推荐分类维度
+ */
+async function recommendDimensions(
+  apiKey: string,
+  researchQuestion: string,
+  literatureList: Array<{
+    id: string;
+    title?: string;
+    abstract?: string;
+    authors?: string;
+    year?: number;
+    keywords?: string | string[];
+  }>
+): Promise<Array<{
+  name: string;
+  description: string;
+  categories: string[];
+  rationale: string;
+  literatureCount: number;
+}>> {
+  // 准备文献摘要（限制总长度）
+  const literatureSummaries = literatureList
+    .slice(0, 30) // 最多分析30篇
+    .map((lit, idx) => {
+      const keywords = Array.isArray(lit.keywords) 
+        ? lit.keywords.join(', ') 
+        : lit.keywords || '';
+      return `[${idx + 1}] 标题: ${lit.title || '未知'}
+    作者: ${lit.authors || '未知'} (${lit.year || '未知年份'})
+    关键词: ${keywords}
+    摘要: ${(lit.abstract || '').substring(0, 500)}`;
+    })
+    .join('\n\n');
+
+  const systemPrompt = `你是一位专业的医学Meta分析专家。你的任务是根据研究问题和文献内容，推荐适合进行亚组分析或敏感性分析的分类维度。
+
+## 你的任务
+1. 分析研究问题，识别可能影响研究结果的关键因素
+2. 从文献中提取这些因素的不同取值/类别
+3. 推荐有意义的分类维度，用于亚组分析
+
+## 分类维度的选择原则
+1. 临床意义：该因素在临床上可能影响治疗效果或结局
+2. 可操作性：文献中通常会报告该因素的信息
+3. 异质性来源：该因素可能是导致研究间异质性的原因
+4. 常见维度示例：
+   - 人群特征：年龄、性别、疾病分期、严重程度
+   - 干预特征：药物剂量、给药方式、治疗周期
+   - 研究设计：RCT vs 观察性研究、单中心 vs 多中心
+   - 地域/种族：亚洲人群 vs 西方人群
+
+## 输出格式
+请以JSON格式返回推荐的分类维度列表（最多5个）：
+{
+  "dimensions": [
+    {
+      "name": "维度名称（简洁）",
+      "description": "维度描述（说明为什么这个维度重要）",
+      "categories": ["分类1", "分类2", "未说明/未知"],
+      "rationale": "推荐理由（基于研究问题和文献内容）",
+      "literatureCount": 估计有多少篇文献可以据此分类
+    }
+  ]
+}
+
+注意：
+- 每个维度必须有明确的分类选项，通常2-4个类别
+- 类别应互斥且覆盖主要情况
+- 建议包含"未说明"或"未知"类别以处理信息缺失`;
+
+  const userPrompt = `## 研究问题
+${researchQuestion}
+
+## 待分析的文献（共${literatureList.length}篇，以下为前${Math.min(30, literatureList.length)}篇摘要）
+${literatureSummaries}
+
+请根据研究问题和文献内容，推荐适合的分类维度。`;
+
+  const response = await fetch('https://api.deepseek.com/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: 'deepseek-chat',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature: 0.3,
+      response_format: { type: 'json_object' },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`DeepSeek API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const content_text = data.choices[0]?.message?.content || '{"dimensions":[]}';
+
+  try {
+    const result = JSON.parse(content_text);
+    return result.dimensions || [];
+  } catch {
+    return [];
   }
 }
