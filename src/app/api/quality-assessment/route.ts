@@ -337,26 +337,102 @@ export async function POST(request: NextRequest) {
 
     try {
       // 调用 DeepSeek API 进行评估
-      // 使用 deepseek-chat 模型，速度比 deepseek-reasoner 快5-10倍
+      // 使用 deepseek-chat 模型，配合优化的 prompt 确保评估质量
       const openai = new OpenAI({
         apiKey: apiKey,
         baseURL: 'https://api.deepseek.com',
       });
 
+      // 根据量表类型定制系统提示词
+      let systemPrompt = '';
+      if (scaleType === 'rob2') {
+        systemPrompt = `你是一位资深的系统综述方法学专家，精通Cochrane RoB 2.0偏倚风险评估工具。
+
+## 评估原则
+1. **证据导向**：所有判断必须基于文献中的具体描述，不能凭空推测
+2. **保守评估**：当信息不明确时，倾向于"有些担忧"而非直接判断"低风险"
+3. **详细记录**：为每个判断提供文献中的具体依据
+4. **一致性**：总体风险判断需与各域判断相符
+
+## 判断标准详解
+- **D1 随机化过程**：
+  - 若未描述随机方法 → some_concerns
+  - 若明确说明"随机数字表"、"计算机生成"等 → low
+  - 若使用"交替分配"、"按入院顺序"等 → high
+  
+- **D2 偏离预期干预**：
+  - 开放性研究（无盲法）需评估是否影响结果
+  - 若实施了盲法但未描述破盲情况 → some_concerns
+  
+- **D3 结局数据缺失**：
+  - 失访率<5%且描述了原因 → low
+  - 失访率5-20% → some_concerns
+  - 失访率>20%或未描述 → high
+  
+- **D4 结局测量**：
+  - 客观指标（如死亡率）可降低盲法要求
+  - 主观指标必须有盲法评估
+  
+- **D5 结果报告选择性**：
+  - 有预注册方案且结果一致 → low
+  - 未发现预注册方案 → some_concerns
+  - 明显的选择性报告 → high
+
+## 总体风险判断
+- **Low**：所有域均为low
+- **Some concerns**：至少一个域为some concerns，无high
+- **High**：至少一个域为high，或多个域为some concerns
+
+请确保每个判断都有文献依据，answer字段需引用文献原文或说明"文献未提及"。`;
+      } else if (scaleType === 'nos') {
+        systemPrompt = `你是一位资深的系统综述方法学专家，精通Newcastle-Ottawa量表(NOS)用于观察性研究质量评估。
+
+## 评估原则
+1. **证据导向**：所有判断必须基于文献中的具体描述
+2. **严格评分**：只有明确符合标准的才能获得星星，信息不明确不得分
+3. **详细记录**：每个评分需说明文献依据
+4. **合理判断**：根据研究设计特点合理评估
+
+## 评分标准详解
+**选择组 (Selection) - 最多4星**
+- S1: 真正的人群代表性才得满分，医院样本需无选择偏倚才可得星
+- S2: 非暴露组必须与暴露组来自同一人群才得星
+- S3: 仅安全记录或结构化访谈可得星
+- S4: 必须明确说明研究开始时无结局才得星
+
+**可比性组 (Comparability) - 最多2星**
+- C1: 必须明确说明控制了年龄等核心混杂因素
+- C2: 需说明控制了其他重要混杂因素
+
+**结局组 (Outcome) - 最多3星**
+- O1: 盲法评估或记录链接才得星
+- O2: 随访时间需足以观察到结局
+- O3: 失访率<5%才得星，5-20%得半星，>20%不得分
+
+## 质量等级判定
+- **Low risk (高质量)**: ≥7星
+- **Some concerns (中等质量)**: 4-6星  
+- **High risk (低质量)**: ≤3星
+
+请确保每个评分都有文献依据，answer字段需引用文献原文或说明"文献未提及"。`;
+      } else {
+        systemPrompt = `你是一位专业的系统综述方法学专家，请严格按照量表要求进行质量评估。所有判断必须基于文献证据，信息不明确时保持保守态度。`;
+      }
+
       const response = await openai.chat.completions.create({
-        model: 'deepseek-chat', // 使用快速模型
+        model: 'deepseek-chat',
         messages: [
           {
             role: 'system',
-            content: '你是一位专业的系统综述方法学专家，请严格按照JSON格式输出评估结果。',
+            content: systemPrompt,
           },
           {
             role: 'user',
-            content: prompt + literature.raw_content.substring(0, 30000), // 限制内容长度
+            content: prompt + literature.raw_content.substring(0, 30000),
           },
         ],
         max_tokens: 4000,
-        temperature: 0.3, // 降低随机性，提高一致性
+        temperature: 0.1, // 极低温度，确保输出稳定性和一致性
       });
 
       const content = response.choices[0]?.message?.content || '';
