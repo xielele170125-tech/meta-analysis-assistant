@@ -207,6 +207,7 @@ export default function Home() {
     outcome?: { terms?: string[]; inferred?: boolean };
   } | null>(null);
   const [searchQueries, setSearchQueries] = useState<any>(null);
+  const [searchStrategy, setSearchStrategy] = useState<'core' | 'sensitive' | 'filtered'>('core');
   const [pubmedResults, setPubmedResults] = useState<any[]>([]);
   const [screeningResults, setScreeningResults] = useState<Map<string, any>>(new Map());
   const [generatingQuery, setGeneratingQuery] = useState(false);
@@ -1954,12 +1955,80 @@ export default function Home() {
               {searchQueries?.queries && (
                 <Card>
                   <CardHeader>
-                    <CardTitle>检索式</CardTitle>
-                    <CardDescription>
-                      多数据库检索式，可复制到相应数据库使用
-                    </CardDescription>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle>检索式</CardTitle>
+                        <CardDescription>
+                          多数据库检索式，可复制到相应数据库使用
+                        </CardDescription>
+                      </div>
+                    </div>
                   </CardHeader>
                   <CardContent>
+                    {/* 检索策略选择 */}
+                    <div className="mb-4 p-4 bg-slate-50 rounded-lg">
+                      <div className="text-sm font-medium mb-3">选择检索策略</div>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <button
+                          onClick={() => setSearchStrategy('core')}
+                          className={`p-4 rounded-lg border-2 text-left transition-all ${
+                            searchStrategy === 'core' 
+                              ? 'border-blue-500 bg-blue-50' 
+                              : 'border-slate-200 hover:border-slate-300'
+                          }`}
+                        >
+                          <div className="font-medium text-sm mb-1">🎯 核心概念检索</div>
+                          <div className="text-xs text-slate-500 mb-2">精确检索，结果最少</div>
+                          <div className="text-xs text-slate-400">
+                            目标：100-2000篇
+                            {searchQueries.queries?.pubmed?.estimatedResultsCore && (
+                              <span className="text-blue-600 ml-1">
+                                (预估: {searchQueries.queries.pubmed.estimatedResultsCore})
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                        <button
+                          onClick={() => setSearchStrategy('sensitive')}
+                          className={`p-4 rounded-lg border-2 text-left transition-all ${
+                            searchStrategy === 'sensitive' 
+                              ? 'border-orange-500 bg-orange-50' 
+                              : 'border-slate-200 hover:border-slate-300'
+                          }`}
+                        >
+                          <div className="font-medium text-sm mb-1">🔍 敏感性检索</div>
+                          <div className="text-xs text-slate-500 mb-2">扩展同义词，更全面</div>
+                          <div className="text-xs text-slate-400">
+                            目标：1000-5000篇
+                            {searchQueries.queries?.pubmed?.estimatedResultsSensitive && (
+                              <span className="text-orange-600 ml-1">
+                                (预估: {searchQueries.queries.pubmed.estimatedResultsSensitive})
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                        <button
+                          onClick={() => setSearchStrategy('filtered')}
+                          className={`p-4 rounded-lg border-2 text-left transition-all ${
+                            searchStrategy === 'filtered' 
+                              ? 'border-green-500 bg-green-50' 
+                              : 'border-slate-200 hover:border-slate-300'
+                          }`}
+                        >
+                          <div className="font-medium text-sm mb-1">🔬 研究类型限定</div>
+                          <div className="text-xs text-slate-500 mb-2">添加RCT/系统评价过滤器</div>
+                          <div className="text-xs text-slate-400">
+                            目标：50-500篇
+                            {searchQueries.queries?.pubmed?.estimatedResultsFiltered && (
+                              <span className="text-green-600 ml-1">
+                                (预估: {searchQueries.queries.pubmed.estimatedResultsFiltered})
+                              </span>
+                            )}
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+                    
                     <Tabs value={selectedDatabase} onValueChange={(v: any) => setSelectedDatabase(v)}>
                       <TabsList className="mb-4">
                         <TabsTrigger value="pubmed">PubMed</TabsTrigger>
@@ -1968,34 +2037,47 @@ export default function Home() {
                         <TabsTrigger value="webofscience">Web of Science</TabsTrigger>
                       </TabsList>
                       
-                      {['pubmed', 'embase', 'cochrane', 'webofscience'].map((db) => (
-                        <TabsContent key={db} value={db}>
-                          <div className="space-y-4">
-                            <div>
-                              <div className="flex items-center justify-between mb-2">
-                                <span className="text-sm font-medium">检索式</span>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => {
-                                    const query = searchQueries.queries[db]?.query || '';
-                                    navigator.clipboard.writeText(query);
-                                    alert('已复制到剪贴板');
-                                  }}
-                                >
-                                  复制
-                                </Button>
+                      {['pubmed', 'embase', 'cochrane', 'webofscience'].map((db) => {
+                        const getQuery = () => {
+                          const q = searchQueries.queries[db] || {};
+                          if (searchStrategy === 'core') return q.queryCore || q.query;
+                          if (searchStrategy === 'sensitive') return q.querySensitive || q.query;
+                          return q.queryFiltered || q.query;
+                        };
+                        const query = getQuery();
+                        
+                        return (
+                          <TabsContent key={db} value={db}>
+                            <div className="space-y-4">
+                              <div>
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="text-sm font-medium">
+                                    {searchStrategy === 'core' ? '核心检索式' : 
+                                     searchStrategy === 'sensitive' ? '敏感性检索式' : 
+                                     '研究类型限定检索式'}
+                                  </span>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      if (query) {
+                                        navigator.clipboard.writeText(query);
+                                        alert('已复制到剪贴板');
+                                      }
+                                    }}
+                                  >
+                                    复制
+                                  </Button>
+                                </div>
+                                <pre className="p-4 bg-slate-50 rounded-lg text-xs overflow-x-auto whitespace-pre-wrap">
+                                  {query || '暂无检索式'}
+                                </pre>
                               </div>
-                              <pre className="p-4 bg-slate-50 rounded-lg text-xs overflow-x-auto whitespace-pre-wrap">
-                                {searchQueries.queries[db]?.query || '暂无检索式'}
-                              </pre>
-                            </div>
                             
                             {db === 'pubmed' && (
                               <div className="flex gap-2">
                                 <Button
                                   onClick={async () => {
-                                    const query = searchQueries.queries[db]?.query;
                                     if (!query) return;
                                     
                                     setSearching(true);
@@ -2033,7 +2115,6 @@ export default function Home() {
                                 <Button
                                   variant="outline"
                                   onClick={() => {
-                                    const query = searchQueries.queries[db]?.query;
                                     if (query) {
                                       window.open(`https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(query)}`, '_blank');
                                     }
@@ -2052,16 +2133,10 @@ export default function Home() {
                                 ))}
                               </div>
                             </div>
-                            
-                            {searchQueries.queries[db]?.estimatedResults && (
-                              <div className="text-sm text-slate-500">
-                                <span className="font-medium">预估结果：</span>
-                                {searchQueries.queries[db].estimatedResults}
-                              </div>
-                            )}
                           </div>
                         </TabsContent>
-                      ))}
+                      );
+                    })}
                     </Tabs>
                     
                     {/* 检索策略说明 */}

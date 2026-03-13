@@ -173,112 +173,107 @@ async function generateSearchQueries(
 
   const systemPrompt = `你是一位资深的医学文献检索专家，精通各大生物医学数据库的检索语法。
 
-## 核心任务
-根据研究问题生成**专业、全面**的检索式，确保：
-1. **敏感性优先**：宁可多检，不可漏检
-2. **概念完整**：覆盖所有相关概念和同义词
-3. **语法正确**：符合各数据库的检索语法
+## 核心原则：精确性优先
 
-## 检索策略原则
+检索结果过多（如超过5000篇）会严重影响后续筛选工作。请生成**精确且可操作**的检索式。
 
-### 概念提取与扩展
-1. 从研究问题中提取核心概念（通常2-5个）
-2. 每个概念扩展：
-   - 同义词、近义词、拼写变体
-   - 上位词、下位词
-   - 英式/美式拼写差异
-   - 缩写全称
+## 检索策略层次
 
-### 概念组合策略
-1. **核心概念必须包含**：使用AND连接
-2. **同义词概念扩展**：使用OR连接
-3. **排除明显无关**：谨慎使用NOT
+### 策略A：核心概念精确检索（推荐）
+- 仅组合最核心的2-3个概念
+- 使用AND连接核心概念
+- 使用[Title/Abstract]字段限定，提高精确性
+- 目标结果：100-2000篇
 
-### 不同研究类型策略
-- **干预性研究**：PICO框架 + 研究类型过滤器
-- **观察性研究**：PECO框架 + 队列/病例对照过滤器
-- **诊断性研究**：QUADAS框架 + 敏感性/特异性词
-- **广泛综述**：核心概念组合，不过度限制
+### 策略B：敏感性检索
+- 使用更宽松的检索策略
+- 扩展同义词和主题词
+- 使用OR连接同义词
+- 目标结果：1000-5000篇
 
-## 数据库特定语法
+### 策略C：研究类型限定
+- 在核心概念基础上添加研究类型过滤器
+- RCT过滤器、系统评价过滤器等
+- 目标结果：50-500篇
 
-### PubMed/MEDLINE
-- MeSH主题词: "term"[MeSH Terms]
-- 标题/摘要: "term"[Title/Abstract]
-- 字段: [tiab], [ot], [nm], [sh]
-- 通配符: *用于词根扩展
+## 限制结果数量的关键技巧
 
-### EMBASE
-- EMTREE主题词: 'term'/exp
-- 字段: :ti, :ab, :de
-- 通配符: *用于词根扩展
+### 1. 字段限定
+- 使用[Title/Abstract]而非[All Fields]
+- 重要概念限定在标题：[Title]
+- 减少使用通配符*
 
-### Cochrane Library
-- MeSH和自由词结合
-- 字段: :ti, :ab, :kw
-- 可限定为Cochrane Reviews或Trials
+### 2. 概念组合
+- 增加AND连接的概念数量
+- 避免单个概念单独检索
+- 核心概念必须全部出现在标题或摘要中
 
-### Web of Science
-- 主题字段: TS=(term)
-- 标题: TI=(term)
-- 摘要: AB=(term)
-- 通配符: *用于词根扩展
+### 3. 研究类型过滤器
+- RCT: (randomized controlled trial[pt] OR randomized[tiab] OR placebo[tiab])
+- 系统评价: (systematic review[pt] OR meta-analysis[pt] OR meta-analysis[tiab])
+- 队列研究: (cohort studies[mh] OR cohort[tiab])
+
+### 4. 时间限制
+- 建议近10年文献
+- 格式: ("2014"[Date - Publication] : "3000"[Date - Publication])
 
 ## 输出要求
-为每个数据库生成：
-1. 完整可执行的检索式
-2. 使用的主题词列表
-3. 关键词列表
-4. 预估结果数量范围
+
+为每个数据库生成**三种策略**的检索式：
 
 返回纯JSON格式：
 {
-  "frameworkType": "PICO/PECO/宽泛主题/其他",
+  "frameworkType": "PICO/PECO/宽泛主题",
   "conceptAnalysis": {
-    "mainConcepts": ["概念1", "概念2"],
+    "mainConcepts": ["核心概念1", "核心概念2"],
+    "secondaryConcepts": ["次要概念"],
     "expandedTerms": {
-      "概念1": ["同义词1", "同义词2", "MeSH词"],
-      "概念2": ["同义词1", "变体1"]
+      "概念1": ["同义词1", "MeSH词1"]
     }
   },
   "queries": {
     "pubmed": {
-      "query": "完整检索式（一行，可直接复制使用）",
+      "queryCore": "核心概念精确检索式（目标100-2000篇）",
+      "querySensitive": "敏感性检索式（目标1000-5000篇）",
+      "queryFiltered": "带研究类型过滤的检索式（目标50-500篇）",
       "meshTerms": ["使用的MeSH词"],
       "keywords": ["关键词"],
-      "estimatedResults": "预估数量范围，如1000-5000"
+      "estimatedResultsCore": "预估数量如200-500",
+      "estimatedResultsSensitive": "预估数量如1000-2000",
+      "estimatedResultsFiltered": "预估数量如50-100"
     },
     "embase": {
-      "query": "完整检索式",
-      "emtreeTerms": ["使用的EMTREE词"],
-      "keywords": ["关键词"],
-      "estimatedResults": "预估数量范围"
+      "queryCore": "核心检索式",
+      "querySensitive": "敏感性检索式", 
+      "queryFiltered": "带过滤器的检索式",
+      "emtreeTerms": [],
+      "keywords": []
     },
     "cochrane": {
-      "query": "完整检索式",
-      "fields": ["检索字段"],
-      "estimatedResults": "预估数量范围"
+      "queryCore": "核心检索式",
+      "querySensitive": "敏感性检索式",
+      "queryFiltered": "带过滤器的检索式"
     },
     "webofscience": {
-      "query": "完整检索式",
-      "fields": ["检索字段"],
-      "estimatedResults": "预估数量范围"
+      "queryCore": "核心检索式",
+      "querySensitive": "敏感性检索式",
+      "queryFiltered": "带过滤器的检索式"
     }
   },
-  "strategy": "检索策略说明（为什么这样组合概念）",
-  "sensitivityNotes": "敏感性说明（可能漏检的风险点）",
-  "precisionNotes": "精确性说明（可能包含的不相关文献类型）",
-  "suggestions": ["进一步优化建议"],
+  "strategy": "检索策略说明",
+  "sensitivityNotes": "敏感性策略说明",
+  "precisionNotes": "精确性策略说明",
+  "suggestions": ["如结果仍过多，建议：1.增加概念 2.限定时间范围 3.添加研究类型过滤器"],
   "filters": {
-    "studyTypeFilters": ["研究类型过滤器，如RCT过滤器"],
-    "timeRange": "建议的时间范围",
-    "languageFilters": ["语言限制建议"]
+    "rctFilter": "RCT过滤器字符串",
+    "systematicReviewFilter": "系统评价过滤器字符串",
+    "timeFilter": "时间范围建议"
   }
 }`;
 
   const response = await callLLM([
     { role: 'system', content: systemPrompt },
-    { role: 'user', content: `研究问题：${researchQuestion}\n${picoText}\n\n请生成各数据库的专业检索式。如果研究问题宽泛或要素不完整，请主动推断和扩展相关概念，确保检索的全面性。` },
+    { role: 'user', content: `研究问题：${researchQuestion}\n${picoText}\n\n请生成**三种精确度**的检索式，优先推荐核心概念精确检索，目标结果控制在100-2000篇之间。如果核心概念不够明确，建议添加研究类型过滤器来限制结果数量。` },
   ], {
     usageType: 'classification',
     temperature: 0.3,
