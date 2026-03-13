@@ -196,6 +196,23 @@ export default function Home() {
   const [apiKey, setApiKey] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [activeTab, setActiveTab] = useState('literature');
+  
+  // 文献检索相关状态
+  const [researchQuestion, setResearchQuestion] = useState('');
+  const [picoElements, setPicoElements] = useState<{
+    population: string[];
+    intervention: string[];
+    comparison: string[];
+    outcome: string[];
+  } | null>(null);
+  const [searchQueries, setSearchQueries] = useState<any>(null);
+  const [pubmedResults, setPubmedResults] = useState<any[]>([]);
+  const [screeningResults, setScreeningResults] = useState<Map<string, any>>(new Map());
+  const [generatingQuery, setGeneratingQuery] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [screening, setScreening] = useState(false);
+  const [selectedDatabase, setSelectedDatabase] = useState<'pubmed' | 'embase' | 'cochrane' | 'webofscience'>('pubmed');
+  
   const [literature, setLiterature] = useState<Literature[]>([]);
   const [uploading, setUploading] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -667,7 +684,6 @@ export default function Home() {
   };
 
   // AI推荐分类维度
-  const [researchQuestion, setResearchQuestion] = useState('');
   const [recommendingDimensions, setRecommendingDimensions] = useState(false);
   const [recommendedDimensions, setRecommendedDimensions] = useState<Array<{
     name: string;
@@ -1763,7 +1779,8 @@ export default function Home() {
         )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-7 mb-6">
+          <TabsList className="grid w-full grid-cols-8 mb-6">
+            <TabsTrigger value="search" className="gap-2"><Search className="h-4 w-4" /> 文献检索</TabsTrigger>
             <TabsTrigger value="literature" className="gap-2"><Upload className="h-4 w-4" /> 文献管理</TabsTrigger>
             <TabsTrigger value="classify" className="gap-2"><Layers className="h-4 w-4" /> 文献分类</TabsTrigger>
             <TabsTrigger value="data" className="gap-2"><Database className="h-4 w-4" /> 数据提取</TabsTrigger>
@@ -1772,6 +1789,408 @@ export default function Home() {
             <TabsTrigger value="analysis" className="gap-2"><BarChart3 className="h-4 w-4" /> Meta分析</TabsTrigger>
             <TabsTrigger value="network" className="gap-2"><Network className="h-4 w-4" /> 网状分析</TabsTrigger>
           </TabsList>
+
+          {/* 文献检索 Tab */}
+          <TabsContent value="search">
+            <div className="space-y-6">
+              {/* 研究问题输入 */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Search className="h-5 w-5" />
+                    研究问题
+                  </CardTitle>
+                  <CardDescription>
+                    输入您的研究问题，系统将自动生成专业检索式
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium mb-2 block">研究问题（PICO格式）</label>
+                    <textarea
+                      value={researchQuestion}
+                      onChange={(e) => setResearchQuestion(e.target.value)}
+                      placeholder="例如：对于2型糖尿病患者，二甲双胍联合胰岛素治疗与单独胰岛素治疗相比，能否更好地控制血糖？"
+                      className="w-full min-h-[100px] p-3 border rounded-lg text-sm"
+                    />
+                  </div>
+                  
+                  {/* PICO要素 */}
+                  {picoElements && (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+                      <div className="p-3 bg-blue-50 rounded-lg">
+                        <div className="text-xs font-medium text-blue-600 mb-1">P - 人群</div>
+                        <div className="text-sm">{picoElements.population?.join(', ') || '-'}</div>
+                      </div>
+                      <div className="p-3 bg-green-50 rounded-lg">
+                        <div className="text-xs font-medium text-green-600 mb-1">I - 干预</div>
+                        <div className="text-sm">{picoElements.intervention?.join(', ') || '-'}</div>
+                      </div>
+                      <div className="p-3 bg-orange-50 rounded-lg">
+                        <div className="text-xs font-medium text-orange-600 mb-1">C - 对照</div>
+                        <div className="text-sm">{picoElements.comparison?.join(', ') || '-'}</div>
+                      </div>
+                      <div className="p-3 bg-purple-50 rounded-lg">
+                        <div className="text-xs font-medium text-purple-600 mb-1">O - 结局</div>
+                        <div className="text-sm">{picoElements.outcome?.join(', ') || '-'}</div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={async () => {
+                        if (!researchQuestion.trim()) {
+                          alert('请输入研究问题');
+                          return;
+                        }
+                        setGeneratingQuery(true);
+                        try {
+                          // 先解析PICO
+                          const picoRes = await fetch('/api/literature/search-query/generate', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              action: 'parse_pico',
+                              researchQuestion,
+                            }),
+                          });
+                          const picoData = await picoRes.json();
+                          if (picoData.success) {
+                            setPicoElements({
+                              population: picoData.data.pico?.population?.terms || [],
+                              intervention: picoData.data.pico?.intervention?.terms || [],
+                              comparison: picoData.data.pico?.comparison?.terms || [],
+                              outcome: picoData.data.pico?.outcome?.terms || [],
+                            });
+                          }
+                          
+                          // 然后生成检索式
+                          const queryRes = await fetch('/api/literature/search-query/generate', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              action: 'generate',
+                              researchQuestion,
+                              pico: picoData.data?.pico,
+                            }),
+                          });
+                          const queryData = await queryRes.json();
+                          if (queryData.success) {
+                            setSearchQueries(queryData.data);
+                          }
+                        } catch (error) {
+                          console.error('Generate query error:', error);
+                          alert('生成检索式失败');
+                        } finally {
+                          setGeneratingQuery(false);
+                        }
+                      }}
+                      disabled={generatingQuery || !researchQuestion.trim()}
+                    >
+                      {generatingQuery ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          生成中...
+                        </>
+                      ) : (
+                        <>
+                          <Brain className="mr-2 h-4 w-4" />
+                          生成检索式
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+              
+              {/* 检索式展示 */}
+              {searchQueries?.queries && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>检索式</CardTitle>
+                    <CardDescription>
+                      多数据库检索式，可复制到相应数据库使用
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Tabs value={selectedDatabase} onValueChange={(v: any) => setSelectedDatabase(v)}>
+                      <TabsList className="mb-4">
+                        <TabsTrigger value="pubmed">PubMed</TabsTrigger>
+                        <TabsTrigger value="embase">EMBASE</TabsTrigger>
+                        <TabsTrigger value="cochrane">Cochrane</TabsTrigger>
+                        <TabsTrigger value="webofscience">Web of Science</TabsTrigger>
+                      </TabsList>
+                      
+                      {['pubmed', 'embase', 'cochrane', 'webofscience'].map((db) => (
+                        <TabsContent key={db} value={db}>
+                          <div className="space-y-4">
+                            <div>
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-sm font-medium">检索式</span>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    const query = searchQueries.queries[db]?.query || '';
+                                    navigator.clipboard.writeText(query);
+                                    alert('已复制到剪贴板');
+                                  }}
+                                >
+                                  复制
+                                </Button>
+                              </div>
+                              <pre className="p-4 bg-slate-50 rounded-lg text-xs overflow-x-auto whitespace-pre-wrap">
+                                {searchQueries.queries[db]?.query || '暂无检索式'}
+                              </pre>
+                            </div>
+                            
+                            {db === 'pubmed' && (
+                              <div className="flex gap-2">
+                                <Button
+                                  onClick={async () => {
+                                    const query = searchQueries.queries[db]?.query;
+                                    if (!query) return;
+                                    
+                                    setSearching(true);
+                                    setPubmedResults([]);
+                                    try {
+                                      const res = await fetch(`/api/literature/search/pubmed?action=search&query=${encodeURIComponent(query)}&maxResults=100`);
+                                      const data = await res.json();
+                                      if (data.success) {
+                                        setPubmedResults(data.data.articles || []);
+                                        alert(`检索完成，共 ${data.data.totalCount} 条结果，显示前 ${data.data.articles?.length || 0} 条`);
+                                      } else {
+                                        alert('检索失败: ' + data.error);
+                                      }
+                                    } catch (error) {
+                                      console.error('Search error:', error);
+                                      alert('检索失败');
+                                    } finally {
+                                      setSearching(false);
+                                    }
+                                  }}
+                                  disabled={searching}
+                                >
+                                  {searching ? (
+                                    <>
+                                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                      检索中...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Search className="mr-2 h-4 w-4" />
+                                      执行PubMed检索
+                                    </>
+                                  )}
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  onClick={() => {
+                                    const query = searchQueries.queries[db]?.query;
+                                    if (query) {
+                                      window.open(`https://pubmed.ncbi.nlm.nih.gov/?term=${encodeURIComponent(query)}`, '_blank');
+                                    }
+                                  }}
+                                >
+                                  在PubMed中打开
+                                </Button>
+                              </div>
+                            )}
+                            
+                            <div className="text-sm text-slate-500">
+                              <div className="font-medium mb-1">主题词/关键词</div>
+                              <div className="flex flex-wrap gap-1">
+                                {(searchQueries.queries[db]?.meshTerms || searchQueries.queries[db]?.emtreeTerms || searchQueries.queries[db]?.keywords || []).map((term: string, i: number) => (
+                                  <Badge key={i} variant="secondary" className="text-xs">{term}</Badge>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        </TabsContent>
+                      ))}
+                    </Tabs>
+                    
+                    {searchQueries.strategy && (
+                      <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                        <div className="text-sm font-medium text-blue-700 mb-1">检索策略说明</div>
+                        <div className="text-sm text-blue-600">{searchQueries.strategy}</div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+              
+              {/* 检索结果 */}
+              {pubmedResults.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle>检索结果</CardTitle>
+                        <CardDescription>共 {pubmedResults.length} 条结果</CardDescription>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          onClick={async () => {
+                            // 执行AI初筛
+                            setScreening(true);
+                            try {
+                              const res = await fetch('/api/literature/screening', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  action: 'screen',
+                                  researchQuestion,
+                                  articles: pubmedResults,
+                                }),
+                              });
+                              const data = await res.json();
+                              if (data.success) {
+                                const resultMap = new Map<string, any>();
+                                data.data.results.forEach((r: any) => {
+                                  resultMap.set(r.pmid, r);
+                                });
+                                setScreeningResults(resultMap);
+                                alert(`初筛完成：纳入 ${data.data.summary.includeCount} 篇，待定 ${data.data.summary.uncertainCount} 篇，排除 ${data.data.summary.excludeCount} 篇`);
+                              }
+                            } catch (error) {
+                              console.error('Screening error:', error);
+                              alert('初筛失败');
+                            } finally {
+                              setScreening(false);
+                            }
+                          }}
+                          disabled={screening}
+                        >
+                          {screening ? (
+                            <>
+                              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              初筛中...
+                            </>
+                          ) : (
+                            <>
+                              <Brain className="mr-2 h-4 w-4" />
+                              AI初筛
+                            </>
+                          )}
+                        </Button>
+                        <Button
+                          onClick={async () => {
+                            // 导入选中的文献
+                            const includedResults = pubmedResults.filter(
+                              (r) => {
+                                const screening = screeningResults.get(r.pmid);
+                                return !screening || screening.decision !== 'exclude';
+                              }
+                            );
+                            
+                            if (includedResults.length === 0) {
+                              alert('没有可导入的文献');
+                              return;
+                            }
+                            
+                            // 转换为RIS格式并导入
+                            const risContent = includedResults.map((r: any) => 
+                              `TY - JOUR\nTI - ${r.title}\nAB - ${r.abstract}\nAU - ${r.authors?.join('\nAU - ') || ''}\nJO - ${r.journal || ''}\nPY - ${r.year || ''}\nDO - ${r.doi || ''}\nPMID - ${r.pmid}\nER - `
+                            ).join('\n');
+                            
+                            const blob = new Blob([risContent], { type: 'text/plain' });
+                            const formData = new FormData();
+                            formData.append('file', blob, 'screening_results.ris');
+                            
+                            try {
+                              const res = await fetch('/api/literature/import', {
+                                method: 'POST',
+                                body: formData,
+                              });
+                              const data = await res.json();
+                              if (data.success) {
+                                alert(`成功导入 ${data.data.imported} 篇文献`);
+                                setActiveTab('literature');
+                              } else {
+                                alert('导入失败: ' + data.error);
+                              }
+                            } catch (error) {
+                              console.error('Import error:', error);
+                              alert('导入失败');
+                            }
+                          }}
+                        >
+                          <Download className="mr-2 h-4 w-4" />
+                          导入选中文献
+                        </Button>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      {pubmedResults.map((article: any) => {
+                        const screening = screeningResults.get(article.pmid);
+                        return (
+                          <div
+                            key={article.pmid}
+                            className={`p-4 border rounded-lg ${
+                              screening?.decision === 'include' ? 'border-green-300 bg-green-50' :
+                              screening?.decision === 'exclude' ? 'border-red-300 bg-red-50' :
+                              screening?.decision === 'uncertain' ? 'border-yellow-300 bg-yellow-50' :
+                              ''
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <a
+                                    href={`https://pubmed.ncbi.nlm.nih.gov/${article.pmid}/`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="font-medium text-blue-600 hover:underline"
+                                  >
+                                    {article.title}
+                                  </a>
+                                  {screening && (
+                                    <Badge
+                                      variant={
+                                        screening.decision === 'include' ? 'default' :
+                                        screening.decision === 'exclude' ? 'destructive' :
+                                        'secondary'
+                                      }
+                                    >
+                                      {screening.decision === 'include' ? '纳入' :
+                                       screening.decision === 'exclude' ? '排除' : '待定'}
+                                    </Badge>
+                                  )}
+                                </div>
+                                <div className="text-sm text-slate-500 mb-2">
+                                  {article.authors?.slice(0, 3).join(', ')}
+                                  {article.authors?.length > 3 && ' 等'}
+                                  {article.journal && ` - ${article.journal}`}
+                                  {article.year && ` (${article.year})`}
+                                </div>
+                                <p className="text-sm text-slate-600 line-clamp-3">
+                                  {article.abstract || '无摘要'}
+                                </p>
+                                {screening?.reason && (
+                                  <div className="mt-2 text-xs text-slate-500">
+                                    <span className="font-medium">初筛理由：</span>
+                                    {screening.reason}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="text-sm text-slate-400">
+                                PMID: {article.pmid}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          </TabsContent>
 
           <TabsContent value="literature">
             <Card>
