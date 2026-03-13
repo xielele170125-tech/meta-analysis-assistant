@@ -44,16 +44,16 @@ function extractPrompts() {
 }
 
 function generateQuickCopyMarkdown() {
-  const prompts = extractPrompts();
+  const extractedPrompts = extractPrompts();
   let markdown = '# Coze 工作流 Prompt 快速复制\n\n';
   markdown += '本文档包含所有工作流的Prompt配置，可直接复制到Coze平台使用。\n\n';
   markdown += '---\n\n';
 
-  for (const [workflowName, { description, prompts }] of Object.entries(prompts)) {
+  for (const [workflowName, { description, prompts: workflowPrompts }] of Object.entries(extractedPrompts)) {
     markdown += `## ${workflowName}\n\n`;
     markdown += `${description}\n\n`;
 
-    for (const [nodeId, promptConfig] of Object.entries(prompts)) {
+    for (const [nodeId, promptConfig] of Object.entries(workflowPrompts)) {
       markdown += `### ${promptConfig.title}\n\n`;
       markdown += `**模型**: ${promptConfig.model}\n\n`;
       markdown += `**Temperature**: ${promptConfig.temperature}\n\n`;
