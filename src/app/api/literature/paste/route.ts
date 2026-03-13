@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { S3Storage } from 'coze-coding-dev-sdk';
+import { parseEndNoteXML, parseRIS, RISRecord } from '@/lib/ris-parser';
 
 const storage = new S3Storage({
   endpointUrl: process.env.COZE_BUCKET_ENDPOINT_URL,
@@ -139,6 +140,20 @@ async function handleRisPaste(
     const importedRecords = [];
     
     for (const record of records) {
+      // 构建完整的元数据用于存储
+      const metadata = {
+        title: record.title || 'Untitled',
+        authors: record.authors?.join(', '),
+        year: record.year,
+        doi: record.doi,
+        journal: record.journal,
+        volume: record.volume,
+        issue: record.issue,
+        pages: record.pages,
+        abstract: record.abstract,
+        keywords: record.keywords,
+      };
+      
       // 创建文献记录
       const { data: literature, error } = await client
         .from('literature')
@@ -148,15 +163,16 @@ async function handleRisPaste(
           year: record.year,
           doi: record.doi,
           journal: record.journal,
-          volume: record.volume,
-          issue: record.issue,
-          pages: record.pages,
-          abstract: record.abstract,
-          keywords: record.keywords,
+          // 将完整元数据存储到 raw_content 字段
+          raw_content: JSON.stringify(metadata),
           status: 'completed', // RIS导入的文献已有元数据，标记为完成
         })
         .select()
         .single();
+
+      if (error) {
+        console.error('[Paste Import] RIS database insert error:', error);
+      }
 
       if (!error && literature) {
         importedRecords.push(literature);
@@ -197,6 +213,27 @@ async function handleXmlPaste(
     const importedRecords = [];
     
     for (const record of records) {
+      console.log('[Paste Import] Inserting record:', {
+        title: record.title,
+        authors: record.authors,
+        year: record.year,
+        doi: record.doi,
+      });
+      
+      // 构建完整的元数据用于存储
+      const metadata = {
+        title: record.title || 'Untitled',
+        authors: record.authors?.join(', '),
+        year: record.year,
+        journal: record.journal,
+        doi: record.doi,
+        volume: record.volume,
+        issue: record.issue,
+        pages: record.pages,
+        abstract: record.abstract,
+        keywords: record.keywords,
+      };
+      
       const { data: literature, error } = await client
         .from('literature')
         .insert({
@@ -205,15 +242,16 @@ async function handleXmlPaste(
           year: record.year,
           doi: record.doi,
           journal: record.journal,
-          volume: record.volume,
-          issue: record.issue,
-          pages: record.pages,
-          abstract: record.abstract,
-          keywords: record.keywords,
+          // 将完整元数据存储到 raw_content 字段
+          raw_content: JSON.stringify(metadata),
           status: 'completed',
         })
         .select()
         .single();
+
+      if (error) {
+        console.error('[Paste Import] Database insert error:', error);
+      }
 
       if (!error && literature) {
         importedRecords.push(literature);
@@ -354,66 +392,25 @@ function parseRisContent(content: string): Array<Record<string, any>> {
 }
 
 /**
- * 解析EndNote XML格式内容
+ * 解析EndNote XML格式内容（使用增强版解析器）
  */
 function parseXmlContent(content: string): Array<Record<string, any>> {
-  const records: Array<Record<string, any>> = [];
+  // 使用增强后的XML解析器
+  const risRecords = parseEndNoteXML(content);
   
-  // 简单的XML解析（不依赖xml2js）
-  const recordMatches = content.matchAll(/<record>([\s\S]*?)<\/record>/gi);
-  
-  for (const recordMatch of recordMatches) {
-    const recordContent = recordMatch[1];
-    const record: Record<string, any> = {};
-    
-    // 提取标题
-    const titleMatch = recordContent.match(/<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/i);
-    if (titleMatch) record.title = titleMatch[1];
-    
-    // 提取作者
-    const authorMatches = recordContent.matchAll(/<author>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/author>/gi);
-    record.authors = [];
-    for (const authorMatch of authorMatches) {
-      record.authors.push(authorMatch[1]);
-    }
-    
-    // 提取年份
-    const yearMatch = recordContent.match(/<year>(\d{4})<\/year>/i);
-    if (yearMatch) record.year = parseInt(yearMatch[1]);
-    
-    // 提取DOI
-    const doiMatch = recordContent.match(/<doi>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/doi>/i);
-    if (doiMatch) record.doi = doiMatch[1];
-    
-    // 提取期刊
-    const journalMatch = recordContent.match(/<journal>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/journal>/i);
-    if (journalMatch) record.journal = journalMatch[1];
-    
-    // 提取卷期页
-    const volumeMatch = recordContent.match(/<volume>(.*?)<\/volume>/i);
-    if (volumeMatch) record.volume = volumeMatch[1];
-    
-    const issueMatch = recordContent.match(/<issue>(.*?)<\/issue>/i);
-    if (issueMatch) record.issue = issueMatch[1];
-    
-    const pagesMatch = recordContent.match(/<pages>(.*?)<\/pages>/i);
-    if (pagesMatch) record.pages = pagesMatch[1];
-    
-    // 提取摘要
-    const abstractMatch = recordContent.match(/<abstract>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/abstract>/i);
-    if (abstractMatch) record.abstract = abstractMatch[1];
-    
-    // 提取关键词
-    const keywordMatches = recordContent.matchAll(/<keyword>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/keyword>/gi);
-    record.keywords = [];
-    for (const kwMatch of keywordMatches) {
-      record.keywords.push(kwMatch[1]);
-    }
-    
-    if (record.title) {
-      records.push(record);
-    }
-  }
-  
-  return records;
+  // 转换为通用格式
+  return risRecords.map(record => ({
+    title: record.title,
+    authors: record.authors,
+    year: record.year,
+    doi: record.doi,
+    journal: record.journal,
+    volume: record.volume,
+    issue: record.issue,
+    pages: record.pages,
+    abstract: record.abstract,
+    keywords: record.keywords,
+    issn: record.issn,
+    publisher: record.publisher,
+  }));
 }

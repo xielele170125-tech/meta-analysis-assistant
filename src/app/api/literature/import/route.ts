@@ -546,6 +546,20 @@ export async function POST(request: NextRequest) {
         // 生成 PDF 搜索链接（当无法自动下载时）
         const pdfSearchLinks = !pdfDownloaded ? generatePDFSearchLinks(record.title || '', record.doi || null) : undefined;
 
+        // 构建完整的元数据用于存储
+        const metadata = {
+          title: record.title || '未命名文献',
+          authors: record.authors,
+          year: record.year,
+          journal: record.journal,
+          doi: record.doi,
+          volume: record.volume,
+          issue: record.issue,
+          pages: record.pages,
+          abstract: record.abstract,
+          keywords: record.keywords,
+        };
+
         // 创建文献记录
         const { data: literature, error } = await client
           .from('literature')
@@ -557,6 +571,8 @@ export async function POST(request: NextRequest) {
             doi: record.doi,
             file_key: fileKey,
             file_name: fileKey ? `${record.doi || record.title}.pdf` : null,
+            // 将完整元数据存储到 raw_content 字段
+            raw_content: JSON.stringify(metadata),
             status: pdfDownloaded ? 'pending' : 'pending',
           })
           .select()
