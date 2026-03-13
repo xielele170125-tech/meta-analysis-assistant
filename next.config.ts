@@ -14,6 +14,16 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  webpack: (config, { isServer }) => {
+    // 忽略 canvas 模块（pdfjs-dist 的可选依赖）
+    if (isServer) {
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        canvas: false,
+      };
+    }
+    return config;
+  },
 };
 
 export default nextConfig;

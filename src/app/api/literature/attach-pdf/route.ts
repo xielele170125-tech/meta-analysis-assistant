@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { S3Storage } from 'coze-coding-dev-sdk';
-// @ts-ignore
-import * as pdfjs from 'pdfjs-dist';
 
-// 配置 pdfjs worker（Node.js 环境不需要 worker）
-if (typeof (pdfjs as any).GlobalWorkerOptions !== 'undefined') {
-  (pdfjs as any).GlobalWorkerOptions.workerSrc = '';
-}
+// 动态导入 pdfjs-dist（webpack 配置已忽略 canvas 依赖）
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const pdfjs = require('pdfjs-dist/legacy/build/pdf.js');
 
 // 初始化存储
 const storage = new S3Storage({
