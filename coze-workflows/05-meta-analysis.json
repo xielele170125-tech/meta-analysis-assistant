@@ -1,0 +1,105 @@
+{
+  "name": "Meta分析计算",
+  "description": "执行固定/随机效应模型Meta分析，计算合并效应量和异质性",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "title": "开始",
+      "inputs": [
+        {
+          "name": "studies",
+          "type": "array",
+          "required": true,
+          "description": "研究数据列表，格式：[{id, study_name, effect_size, standard_error, sample_size_treatment, sample_size_control}]"
+        },
+        {
+          "name": "model_type",
+          "type": "string",
+          "required": false,
+          "default": "auto",
+          "description": "效应模型：fixed（固定效应）/random（随机效应）/auto（自动选择）"
+        },
+        {
+          "name": "effect_measure",
+          "type": "string",
+          "required": false,
+          "default": "RR",
+          "description": "效应量类型：RR/OR/HR/SMD/MD"
+        }
+      ]
+    },
+    {
+      "id": "validate_input",
+      "type": "code",
+      "title": "验证输入数据",
+      "language": "javascript",
+      "code": "async function main({ start }) {\n  const studies = start.studies || [];\n  const errors = [];\n  const validStudies = [];\n  \n  studies.forEach((study, index) => {\n    // 检查必填字段\n    if (!study.study_name) {\n      errors.push(`研究${index + 1}：缺少研究名称`);\n    }\n    \n    if (typeof study.effect_size !== 'number') {\n      errors.push(`${study.study_name || '研究' + (index + 1)}：缺少效应量`);\n      return;\n    }\n    \n    if (typeof study.standard_error !== 'number' || study.standard_error <= 0) {\n      errors.push(`${study.study_name}：标准误无效`);\n      return;\n    }\n    \n    // 有效研究\n    validStudies.push({\n      id: study.id || `study_${index + 1}`,\n      study_name: study.study_name,\n      effect_size: study.effect_size,\n      standard_error: study.standard_error,\n      sample_size_treatment: study.sample_size_treatment || null,\n      sample_size_control: study.sample_size_control || null\n    });\n  });\n  \n  if (validStudies.length < 2) {\n    errors.push('有效研究数量不足（至少需要2个研究）');\n  }\n  \n  return {\n    valid: errors.length === 0,\n    errors: errors.length > 0 ? errors : undefined,\n    valid_studies: validStudies,\n    total_studies: studies.length,\n    valid_studies_count: validStudies.length\n  };\n}",
+      "next_nodes": ["calculate_fixed", "calculate_random"]
+    },
+    {
+      "id": "calculate_fixed",
+      "type": "code",
+      "title": "固定效应模型",
+      "language": "javascript",
+      "code": "async function main({ validate_input }) {\n  if (!validate_input.valid) {\n    return null;\n  }\n  \n  const studies = validate_input.valid_studies;\n  \n  // 计算权重 (w = 1/SE^2)\n  const weights = studies.map(s => 1 / (s.standard_error * s.standard_error));\n  const totalWeight = weights.reduce((a, b) => a + b, 0);\n  \n  // 加权平均效应量\n  const combinedEffect = studies.reduce((sum, s, i) => sum + weights[i] * s.effect_size, 0) / totalWeight;\n  \n  // 合并标准误\n  const combinedSe = Math.sqrt(1 / totalWeight);\n  \n  // 95% CI\n  const z = 1.96;\n  const combinedCiLower = combinedEffect - z * combinedSe;\n  const combinedCiUpper = combinedEffect + z * combinedSe;\n  \n  // Z检验和P值\n  const zStat = combinedEffect / combinedSe;\n  const combinedPValue = 2 * (1 - normalCDF(Math.abs(zStat)));\n  \n  // 异质性检验\n  const Q = studies.reduce((sum, s, i) => sum + weights[i] * Math.pow(s.effect_size - combinedEffect, 2), 0);\n  const df = studies.length - 1;\n  const I2 = Q > 0 ? Math.max(0, (Q - df) / Q) : 0;\n  const heterogeneityPValue = 1 - chiSquareCDF(Q, df);\n  \n  // 构建结果\n  return {\n    model_type: 'fixed',\n    combined_effect: combinedEffect,\n    combined_se: combinedSe,\n    combined_ci_lower: combinedCiLower,\n    combined_ci_upper: combinedCiUpper,\n    combined_p_value: combinedPValue,\n    z_statistic: zStat,\n    heterogeneity: {\n      Q,\n      df,\n      I2,\n      tau2: 0,\n      p_value: heterogeneityPValue\n    },\n    studies: studies.map((s, i) => ({\n      id: s.id,\n      study_name: s.study_name,\n      effect_size: s.effect_size,\n      se: s.standard_error,\n      weight: (weights[i] / totalWeight) * 100,\n      ci_lower: s.effect_size - 1.96 * s.standard_error,\n      ci_upper: s.effect_size + 1.96 * s.standard_error\n    }))\n  };\n}\n\n// 标准正态分布CDF\nfunction normalCDF(x) {\n  const a1 = 0.254829592;\n  const a2 = -0.284496736;\n  const a3 = 1.421413741;\n  const a4 = -1.453152027;\n  const a5 = 1.061405429;\n  const p = 0.3275911;\n  \n  const sign = x < 0 ? -1 : 1;\n  x = Math.abs(x) / Math.sqrt(2);\n  \n  const t = 1.0 / (1.0 + p * x);\n  const y = 1.0 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);\n  \n  return 0.5 * (1.0 + sign * y);\n}\n\n// 卡方分布CDF\nfunction chiSquareCDF(x, df) {\n  if (x <= 0) return 0;\n  const y = Math.pow(x / df, 1 / 3);\n  const mu = 1 - 2 / (9 * df);\n  const sigma = Math.sqrt(2 / (9 * df));\n  const z = (y - mu) / sigma;\n  return normalCDF(z);\n}",
+      "next_nodes": ["select_model"]
+    },
+    {
+      "id": "calculate_random",
+      "type": "code",
+      "title": "随机效应模型",
+      "language": "javascript",
+      "code": "async function main({ validate_input, calculate_fixed }) {\n  if (!validate_input.valid || !calculate_fixed) {\n    return null;\n  }\n  \n  const studies = validate_input.valid_studies;\n  const Q = calculate_fixed.heterogeneity.Q;\n  const df = studies.length - 1;\n  \n  // 计算 τ² (DerSimonian-Laird方法)\n  const fixedWeights = studies.map(s => 1 / (s.standard_error * s.standard_error));\n  const C = fixedWeights.reduce((a, b) => a + b, 0);\n  const sumWSquared = fixedWeights.reduce((sum, w) => sum + w * w, 0);\n  const tau2 = Math.max(0, (Q - df) / (C - sumWSquared / C));\n  \n  // 重新计算权重 (包含τ²)\n  const weights = studies.map(s => 1 / (s.standard_error * s.standard_error + tau2));\n  const totalWeight = weights.reduce((a, b) => a + b, 0);\n  \n  // 加权平均效应量\n  const combinedEffect = studies.reduce((sum, s, i) => sum + weights[i] * s.effect_size, 0) / totalWeight;\n  \n  // 合并标准误\n  const combinedSe = Math.sqrt(1 / totalWeight);\n  \n  // 95% CI\n  const z = 1.96;\n  const combinedCiLower = combinedEffect - z * combinedSe;\n  const combinedCiUpper = combinedEffect + z * combinedSe;\n  \n  // Z检验和P值\n  const zStat = combinedEffect / combinedSe;\n  const combinedPValue = 2 * (1 - normalCDF(Math.abs(zStat)));\n  \n  // I² 统计量\n  const I2 = Q > 0 ? Math.max(0, (Q - df) / Q) : 0;\n  const heterogeneityPValue = 1 - chiSquareCDF(Q, df);\n  \n  return {\n    model_type: 'random',\n    combined_effect: combinedEffect,\n    combined_se: combinedSe,\n    combined_ci_lower: combinedCiLower,\n    combined_ci_upper: combinedCiUpper,\n    combined_p_value: combinedPValue,\n    z_statistic: zStat,\n    heterogeneity: {\n      Q,\n      df,\n      I2,\n      tau2,\n      p_value: heterogeneityPValue\n    },\n    studies: studies.map((s, i) => ({\n      id: s.id,\n      study_name: s.study_name,\n      effect_size: s.effect_size,\n      se: s.standard_error,\n      weight: (weights[i] / totalWeight) * 100,\n      ci_lower: s.effect_size - 1.96 * s.standard_error,\n      ci_upper: s.effect_size + 1.96 * s.standard_error\n    }))\n  };\n}\n\nfunction normalCDF(x) {\n  const a1 = 0.254829592;\n  const a2 = -0.284496736;\n  const a3 = 1.421413741;\n  const a4 = -1.453152027;\n  const a5 = 1.061405429;\n  const p = 0.3275911;\n  \n  const sign = x < 0 ? -1 : 1;\n  x = Math.abs(x) / Math.sqrt(2);\n  \n  const t = 1.0 / (1.0 + p * x);\n  const y = 1.0 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);\n  \n  return 0.5 * (1.0 + sign * y);\n}\n\nfunction chiSquareCDF(x, df) {\n  if (x <= 0) return 0;\n  const y = Math.pow(x / df, 1 / 3);\n  const mu = 1 - 2 / (9 * df);\n  const sigma = Math.sqrt(2 / (9 * df));\n  const z = (y - mu) / sigma;\n  return normalCDF(z);\n}",
+      "next_nodes": ["select_model"]
+    },
+    {
+      "id": "select_model",
+      "type": "code",
+      "title": "选择最优模型",
+      "language": "javascript",
+      "code": "async function main({ start, validate_input, calculate_fixed, calculate_random }) {\n  if (!validate_input.valid) {\n    return {\n      error: true,\n      message: validate_input.errors.join('\\n')\n    };\n  }\n  \n  const fixedResult = calculate_fixed;\n  const randomResult = calculate_random;\n  \n  // 确定使用哪个模型\n  let selectedModel;\n  let modelReason;\n  \n  if (start.model_type === 'fixed') {\n    selectedModel = fixedResult;\n    modelReason = '用户指定使用固定效应模型';\n  } else if (start.model_type === 'random') {\n    selectedModel = randomResult;\n    modelReason = '用户指定使用随机效应模型';\n  } else {\n    // 自动选择：根据I²判断\n    const I2 = fixedResult.heterogeneity.I2;\n    if (I2 < 0.5) {\n      selectedModel = fixedResult;\n      modelReason = `异质性较低(I²=${(I2*100).toFixed(1)}%)，自动选择固定效应模型`;\n    } else {\n      selectedModel = randomResult;\n      modelReason = `异质性较高(I²=${(I2*100).toFixed(1)}%)，自动选择随机效应模型`;\n    }\n  }\n  \n  return {\n    selected_model: selectedModel,\n    fixed_model: fixedResult,\n    random_model: randomResult,\n    model_selection_reason: modelReason\n  };\n}",
+      "next_nodes": ["interpret_results"]
+    },
+    {
+      "id": "interpret_results",
+      "type": "llm",
+      "title": "解读分析结果",
+      "model": "deepseek-chat",
+      "temperature": 0.3,
+      "prompt": {
+        "system": "你是一位专业的循证医学专家，请解读Meta分析结果。\n\n## 解读要点\n\n### 1. 效应量解读\n根据效应量类型进行解读：\n- RR (相对风险)：RR<1表示干预降低风险，RR>1表示增加风险\n- OR (比值比)：OR<1表示干预降低几率，OR>1表示增加几率\n- HR (风险比)：HR<1表示干预降低风险率\n- SMD (标准化均数差)：SMD<0.2小效应，0.2-0.8中效应，>0.8大效应\n- MD (均数差)：直接解释差异大小\n\n### 2. 异质性解读\n- I² < 25%：低异质性\n- I² 25-50%：中等异质性\n- I² 50-75%：较高异质性\n- I² > 75%：高异质性\n\n### 3. 统计学显著性\n- P < 0.05：统计学显著\n- P ≥ 0.05：无统计学显著性\n\n### 4. 临床意义\n综合考虑效应量大小、置信区间、研究质量等因素\n\n## 输出格式\n\n请用通俗易懂的语言撰写解读报告，包含以下部分：\n\n```json\n{\n  \"main_findings\": \"主要发现（2-3句话）\",\n  \"effect_interpretation\": \"效应量解读\",\n  \"heterogeneity_interpretation\": \"异质性解读\",\n  \"clinical_significance\": \"临床意义\",\n  \"limitations\": [\"局限性1\", \"局限性2\"],\n  \"conclusions\": \"结论\"\n}\n```",
+        "user": "请解读以下Meta分析结果：\n\n模型类型：{{select_model.selected_model.model_type}}\n效应量类型：{{start.effect_measure}}\n合并效应量：{{select_model.selected_model.combined_effect}}\n95%置信区间：[{{select_model.selected_model.combined_ci_lower}}, {{select_model.selected_model.combined_ci_upper}}]\nP值：{{select_model.selected_model.combined_p_value}}\n异质性(I²)：{{select_model.selected_model.heterogeneity.I2}}\n异质性P值：{{select_model.selected_model.heterogeneity.p_value}}\n纳入研究数：{{validate_input.valid_studies_count}}"
+      },
+      "output_parser": "json",
+      "next_nodes": ["generate_report"]
+    },
+    {
+      "id": "generate_report",
+      "type": "code",
+      "title": "生成完整报告",
+      "language": "javascript",
+      "code": "async function main({ start, validate_input, select_model, interpret_results }) {\n  const selectedModel = select_model.selected_model;\n  const fixedModel = select_model.fixed_model;\n  const randomModel = select_model.random_model;\n  \n  let markdown = `# Meta分析结果报告\\n\\n`;\n  \n  // 分析概览\n  markdown += `## 分析概览\\n\\n`;\n  markdown += `- 效应量类型：${start.effect_measure}\\n`;\n  markdown += `- 选用模型：${selectedModel.model_type === 'fixed' ? '固定效应模型' : '随机效应模型'}\\n`;\n  markdown += `- 模型选择理由：${select_model.model_selection_reason}\\n`;\n  markdown += `- 纳入研究数：${validate_input.valid_studies_count}\\n\\n`;\n  \n  // 合并效应量\n  markdown += `## 合并效应量\\n\\n`;\n  const effectDisplay = start.effect_measure === 'RR' || start.effect_measure === 'OR' || start.effect_measure === 'HR'\n    ? `${Math.exp(selectedModel.combined_effect).toFixed(3)} (95% CI: ${Math.exp(selectedModel.combined_ci_lower).toFixed(3)} - ${Math.exp(selectedModel.combined_ci_upper).toFixed(3)})`\n    : `${selectedModel.combined_effect.toFixed(3)} (95% CI: ${selectedModel.combined_ci_lower.toFixed(3)} - ${selectedModel.combined_ci_upper.toFixed(3)})`;\n  \n  markdown += `| 指标 | 值 |\\n`;\n  markdown += `|------|-----|\\n`;\n  markdown += `| 合并效应量 | ${effectDisplay} |\\n`;\n  markdown += `| Z统计量 | ${selectedModel.z_statistic.toFixed(3)} |\\n`;\n  markdown += `| P值 | ${selectedModel.combined_p_value < 0.001 ? '<0.001' : selectedModel.combined_p_value.toFixed(3)} |\\n`;\n  markdown += `| 统计学显著性 | ${selectedModel.combined_p_value < 0.05 ? '✅ 显著' : '❌ 不显著'} |\\n\\n`;\n  \n  // 异质性检验\n  markdown += `## 异质性检验\\n\\n`;\n  const I2Percent = (selectedModel.heterogeneity.I2 * 100).toFixed(1);\n  const heterogeneityLevel = selectedModel.heterogeneity.I2 < 0.25 ? '低' \n    : selectedModel.heterogeneity.I2 < 0.5 ? '中等'\n    : selectedModel.heterogeneity.I2 < 0.75 ? '较高' : '高';\n  \n  markdown += `| 指标 | 值 |\\n`;\n  markdown += `|------|-----|\\n`;\n  markdown += `| Q统计量 | ${selectedModel.heterogeneity.Q.toFixed(2)} |\\n`;\n  markdown += `| 自由度 | ${selectedModel.heterogeneity.df} |\\n`;\n  markdown += `| I² | ${I2Percent}% (${heterogeneityLevel}异质性) |\\n`;\n  if (selectedModel.model_type === 'random') {\n    markdown += `| τ² | ${selectedModel.heterogeneity.tau2.toFixed(4)} |\\n`;\n  }\n  markdown += `| 异质性P值 | ${selectedModel.heterogeneity.p_value < 0.001 ? '<0.001' : selectedModel.heterogeneity.p_value.toFixed(3)} |\\n\\n`;\n  \n  // 研究详情\n  markdown += `## 纳入研究\\n\\n`;\n  markdown += `| 研究 | 效应量(95%CI) | 权重(%) |\\n`;\n  markdown += `|------|--------------|---------|\\n`;\n  selectedModel.studies.forEach(study => {\n    const effectValue = start.effect_measure === 'RR' || start.effect_measure === 'OR' || start.effect_measure === 'HR'\n      ? Math.exp(study.effect_size).toFixed(2)\n      : study.effect_size.toFixed(2);\n    const ciLower = start.effect_measure === 'RR' || start.effect_measure === 'OR' || start.effect_measure === 'HR'\n      ? Math.exp(study.ci_lower).toFixed(2)\n      : study.ci_lower.toFixed(2);\n    const ciUpper = start.effect_measure === 'RR' || start.effect_measure === 'OR' || start.effect_measure === 'HR'\n      ? Math.exp(study.ci_upper).toFixed(2)\n      : study.ci_upper.toFixed(2);\n    \n    markdown += `| ${study.study_name} | ${effectValue} (${ciLower}-${ciUpper}) | ${study.weight.toFixed(1)} |\\n`;\n  });\n  \n  // 结果解读\n  markdown += `\\n## 结果解读\\n\\n`;\n  markdown += `### 主要发现\\n${interpret_results.main_findings}\\n\\n`;\n  markdown += `### 效应量解读\\n${interpret_results.effect_interpretation}\\n\\n`;\n  markdown += `### 异质性解读\\n${interpret_results.heterogeneity_interpretation}\\n\\n`;\n  markdown += `### 临床意义\\n${interpret_results.clinical_significance}\\n\\n`;\n  \n  if (interpret_results.limitations && interpret_results.limitations.length > 0) {\n    markdown += `### 局限性\\n`;\n    interpret_results.limitations.forEach((l, i) => {\n      markdown += `${i + 1}. ${l}\\n`;\n    });\n    markdown += '\\n';\n  }\n  \n  markdown += `### 结论\\n${interpret_results.conclusions}\\n`;\n  \n  return {\n    json: {\n      model_type: selectedModel.model_type,\n      combined_effect: selectedModel.combined_effect,\n      combined_ci: [selectedModel.combined_ci_lower, selectedModel.combined_ci_upper],\n      p_value: selectedModel.combined_p_value,\n      heterogeneity: selectedModel.heterogeneity,\n      studies: selectedModel.studies,\n      interpretation: interpret_results,\n      fixed_model: fixedModel,\n      random_model: randomModel\n    },\n    markdown\n  };\n}",
+      "next_nodes": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "title": "结束",
+      "outputs": [
+        {
+          "name": "results",
+          "type": "object",
+          "value": "{{generate_report.json}}"
+        },
+        {
+          "name": "markdown",
+          "type": "string",
+          "value": "{{generate_report.markdown}}"
+        }
+      ]
+    }
+  ],
+  "variables": []
+}

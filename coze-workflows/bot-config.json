@@ -1,0 +1,185 @@
+{
+  "name": "文献Meta分析助手",
+  "description": "专业的医学文献Meta分析AI助手，支持检索式生成、文献筛选、数据提取、质量评分和Meta分析",
+  "version": "1.0.0",
+  "avatar": "🔬",
+  "personality": {
+    "name": "Meta分析专家",
+    "role": "你是一位专业的循证医学研究助手，精通Meta分析方法论。",
+    "capabilities": [
+      "文献检索：根据研究问题生成PICO/PECO框架检索式",
+      "文献筛选：AI辅助判断文献相关性",
+      "数据提取：从文献中提取研究数据",
+      "质量评估：使用Cochrane RoB 2.0等量表评估",
+      "Meta分析：固定/随机效应模型分析"
+    ],
+    "workflow": [
+      "用户提出研究问题 → 引导生成检索式",
+      "用户上传文献 → 自动分类和筛选",
+      "用户请求数据提取 → 引导提取关键信息",
+      "用户请求分析 → 执行Meta分析并展示结果"
+    ],
+    "communication_style": [
+      "专业但易懂",
+      "主动引导用户完成步骤",
+      "提供详细解释和建议"
+    ]
+  },
+  "greeting": "你好！我是文献Meta分析助手。我可以帮助你：\n\n1. 📝 生成专业的文献检索式\n2. 🔍 AI筛选相关文献\n3. 📊 提取研究数据\n4. ✅ 评估文献质量\n5. 📈 执行Meta分析\n\n请告诉我你的研究问题，我们开始吧！",
+  "example_prompts": [
+    {
+      "user": "我想研究PGT对IVF结局的影响",
+      "intent": "search_query_generation",
+      "action": "调用检索式生成工作流"
+    },
+    {
+      "user": "帮我筛选这50篇文献",
+      "intent": "literature_screening",
+      "action": "调用文献初筛工作流"
+    },
+    {
+      "user": "提取这篇文献的数据",
+      "intent": "data_extraction",
+      "action": "调用数据提取工作流"
+    },
+    {
+      "user": "评估这篇RCT的质量",
+      "intent": "quality_assessment",
+      "action": "调用质量评估工作流"
+    },
+    {
+      "user": "对这些数据进行Meta分析",
+      "intent": "meta_analysis",
+      "action": "调用Meta分析工作流"
+    }
+  ],
+  "intents": {
+    "search_query_generation": {
+      "keywords": ["检索式", "检索策略", "怎么搜", "如何检索", "研究问题"],
+      "workflow": "search_query_generation",
+      "required_params": ["research_question"],
+      "param_extraction": {
+        "research_question": "从用户输入中提取研究问题"
+      }
+    },
+    "literature_screening": {
+      "keywords": ["筛选", "初筛", "判断", "相关性", "纳入排除"],
+      "workflow": "literature_screening",
+      "required_params": ["research_question", "articles"],
+      "param_extraction": {
+        "research_question": "从上下文或用户输入中提取",
+        "articles": "用户上传的文献列表"
+      }
+    },
+    "data_extraction": {
+      "keywords": ["提取", "数据提取", "提取数据", "提取结果"],
+      "workflow": "data_extraction",
+      "required_params": ["literature_content"],
+      "param_extraction": {
+        "literature_content": "用户上传的文献内容"
+      }
+    },
+    "quality_assessment": {
+      "keywords": ["质量", "偏倚风险", "评分", "RoB", "NOS", "质量评估"],
+      "workflow": "quality_assessment",
+      "required_params": ["literature_content", "study_type"],
+      "param_extraction": {
+        "study_type": "从用户输入识别：RCT/队列/病例对照"
+      }
+    },
+    "meta_analysis": {
+      "keywords": ["Meta分析", "汇总", "合并", "森林图", "综合分析"],
+      "workflow": "meta_analysis",
+      "required_params": ["studies"],
+      "param_extraction": {
+        "studies": "从之前的数据提取结果中获取"
+      }
+    }
+  },
+  "workflows": {
+    "search_query_generation": {
+      "path": "01-search-query-generation.json",
+      "description": "生成多数据库检索式",
+      "timeout": 60000
+    },
+    "literature_screening": {
+      "path": "02-literature-screening.json",
+      "description": "AI初筛文献",
+      "timeout": 120000
+    },
+    "data_extraction": {
+      "path": "03-data-extraction.json",
+      "description": "提取结构化数据",
+      "timeout": 90000
+    },
+    "quality_assessment": {
+      "path": "04-quality-assessment.json",
+      "description": "评估文献质量",
+      "timeout": 90000
+    },
+    "meta_analysis": {
+      "path": "05-meta-analysis.json",
+      "description": "执行Meta分析",
+      "timeout": 60000
+    }
+  },
+  "llm_config": {
+    "provider": "deepseek",
+    "model": "deepseek-chat",
+    "fallback_model": "gpt-4",
+    "temperature": 0.3,
+    "max_tokens": 4096
+  },
+  "publish_config": {
+    "platforms": [
+      {
+        "name": "coze_store",
+        "enabled": true,
+        "category": "教育科研",
+        "tags": ["Meta分析", "文献检索", "循证医学", "科研工具"]
+      },
+      {
+        "name": "feishu",
+        "enabled": true,
+        "description": "适合团队协作使用"
+      },
+      {
+        "name": "wechat_official_account",
+        "enabled": true,
+        "description": "适合大众服务"
+      }
+    ]
+  },
+  "monetization": {
+    "enabled": true,
+    "model": "freemium",
+    "pricing": {
+      "free": {
+        "daily_limit": 10,
+        "features": ["基础检索式生成", "单篇文献筛选"]
+      },
+      "pro": {
+        "price": 99,
+        "currency": "CNY",
+        "period": "month",
+        "features": [
+          "无限检索式生成",
+          "批量文献筛选",
+          "数据提取",
+          "质量评估",
+          "Meta分析",
+          "导出报告"
+        ]
+      },
+      "enterprise": {
+        "price": "contact",
+        "features": [
+          "私有化部署",
+          "API访问",
+          "定制开发",
+          "专属支持"
+        ]
+      }
+    }
+  }
+}

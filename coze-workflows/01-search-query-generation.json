@@ -1,0 +1,86 @@
+{
+  "name": "文献检索式生成",
+  "description": "根据研究问题自动生成PubMed/EMBASE等数据库的专业检索式",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "title": "开始",
+      "inputs": [
+        {
+          "name": "research_question",
+          "type": "string",
+          "required": true,
+          "description": "研究问题，例如：胚胎植入前遗传学检测对IVF结局的影响"
+        },
+        {
+          "name": "framework_type",
+          "type": "string",
+          "required": false,
+          "default": "auto",
+          "description": "研究框架类型：PICO/PECO/SPIDER/auto（自动识别）"
+        },
+        {
+          "name": "search_strategy",
+          "type": "string",
+          "required": false,
+          "default": "precise",
+          "description": "检索策略：precise（精确）/sensitive（敏感）/limited（限定）"
+        }
+      ]
+    },
+    {
+      "id": "parse_framework",
+      "type": "llm",
+      "title": "解析研究框架",
+      "model": "deepseek-chat",
+      "temperature": 0.3,
+      "prompt": {
+        "system": "你是一位循证医学专家，精通多种研究问题框架。\n\n## 常见研究框架\n\n### 1. PICO（干预性研究）\n- P (Population): 研究人群\n- I (Intervention): 干预措施\n- C (Comparison): 对照措施\n- O (Outcome): 结局指标\n\n### 2. PECO（暴露研究/观察性研究）\n- P (Population): 研究人群\n- E (Exposure): 暴露因素\n- C (Comparison): 对照/非暴露\n- O (Outcome): 结局指标\n\n### 3. SPIDER（定性/混合研究）\n- S (Sample): 样本\n- PI (Phenomenon of Interest): 感兴趣的现象\n- D (Design): 研究设计\n- E (Evaluation): 评估方法\n- R (Research type): 研究类型\n\n## 任务\n1. 首先判断研究问题属于哪种类型\n2. 提取相应的要素\n3. 如果问题宽泛，**主动推断和扩展**可能的要素\n4. 识别关键概念和同义词\n5. 提供相关的MeSH主题词\n\n【重要】即使问题不完整，也要尽可能推断和扩展，而不是返回空值。",
+        "user": "研究问题：{{start.research_question}}\n\n请分析研究类型，提取关键要素，并尽可能扩展相关概念。如果问题宽泛，请主动推断可能的PICO/PECO要素。"
+      },
+      "output_parser": "json",
+      "next_nodes": ["generate_queries"]
+    },
+    {
+      "id": "generate_queries",
+      "type": "llm",
+      "title": "生成检索式",
+      "model": "deepseek-chat",
+      "temperature": 0.3,
+      "prompt": {
+        "system": "你是一位资深的医学文献检索专家，精通各大生物医学数据库的检索语法。\n\n## 核心原则：精确性优先\n\n检索结果过多（如超过5000篇）会严重影响后续筛选工作。请生成**精确且可操作**的检索式。\n\n## 检索策略层次\n\n### 策略A：核心概念精确检索（推荐）\n- 仅组合最核心的2-3个概念\n- 使用AND连接核心概念\n- 使用[Title/Abstract]字段限定，提高精确性\n- 目标结果：100-2000篇\n\n### 策略B：敏感性检索\n- 使用更宽松的检索策略\n- 扩展同义词和主题词\n- 使用OR连接同义词\n- 目标结果：1000-5000篇\n\n### 策略C：研究类型限定\n- 在核心概念基础上添加研究类型过滤器\n- RCT过滤器、系统评价过滤器等\n- 目标结果：50-500篇\n\n## 限制结果数量的关键技巧\n\n1. **字段限定**：使用[Title/Abstract]而非全字段检索\n2. **概念筛选**：只组合最核心的概念，不必包含所有PICO要素\n3. **主题词限定**：使用[MeSH Terms]限定词\n4. **研究类型**：添加study type过滤器\n\n## 检索策略选择\n\n当前选择：{{start.search_strategy}}\n- precise → 使用策略A\n- sensitive → 使用策略B  \n- limited → 使用策略C\n\n## 输出要求\n\n请生成以下数据库的检索式：\n1. PubMed（使用MeSH主题词）\n2. EMBASE（使用EMTREE主题词）\n3. Cochrane Library\n\n返回纯JSON格式（不要markdown代码块）：\n{\n  \"pubmed\": {\n    \"query\": \"完整检索式\",\n    \"mesh_terms\": [\"使用的MeSH词列表\"],\n    \"keywords\": [\"关键词列表\"],\n    \"estimated_results\": \"预估结果数量范围\"\n  },\n  \"embase\": {\n    \"query\": \"完整检索式\",\n    \"emtree_terms\": [\"EMTREE词列表\"],\n    \"keywords\": [\"关键词列表\"],\n    \"estimated_results\": \"预估结果数量范围\"\n  },\n  \"cochrane\": {\n    \"query\": \"完整检索式\",\n    \"keywords\": [\"关键词列表\"],\n    \"estimated_results\": \"预估结果数量范围\"\n  },\n  \"search_tips\": [\"检索建议1\", \"检索建议2\"]\n}",
+        "user": "研究问题：{{start.research_question}}\n\n提取的要素：\n{{parse_framework.elements}}\n\n请生成精确的检索式，控制结果数量在合理范围内。"
+      },
+      "output_parser": "json",
+      "next_nodes": ["format_output"]
+    },
+    {
+      "id": "format_output",
+      "type": "code",
+      "title": "格式化输出",
+      "language": "javascript",
+      "code": "async function main({ parse_framework, generate_queries, start }) {\n  // 构建输出结果\n  const result = {\n    research_question: start.research_question,\n    framework: {\n      type: parse_framework.frameworkType || 'PICO',\n      description: parse_framework.frameworkDescription || '',\n      elements: parse_framework.elements || {}\n    },\n    search_queries: generate_queries,\n    created_at: new Date().toISOString()\n  };\n  \n  // 格式化为Markdown\n  let markdown = `# 文献检索式生成结果\\n\\n`;\n  markdown += `## 研究问题\\n${result.research_question}\\n\\n`;\n  markdown += `## 研究框架\\n类型：${result.framework.type}\\n\\n`;\n  \n  // 添加要素\n  const elements = result.framework.elements;\n  if (elements.population) {\n    markdown += `### P - 人群\\n${elements.population.terms?.join('、') || '未明确'}\\n`;\n    if (elements.population.mesh?.length > 0) {\n      markdown += `MeSH词：${elements.population.mesh.join('、')}\\n`;\n    }\n    markdown += '\\n';\n  }\n  \n  if (elements.intervention_or_exposure) {\n    markdown += `### I/E - 干预/暴露\\n${elements.intervention_or_exposure.terms?.join('、') || '未明确'}\\n`;\n    if (elements.intervention_or_exposure.mesh?.length > 0) {\n      markdown += `MeSH词：${elements.intervention_or_exposure.mesh.join('、')}\\n`;\n    }\n    markdown += '\\n';\n  }\n  \n  if (elements.comparison) {\n    markdown += `### C - 对照\\n${elements.comparison.terms?.join('、') || '未明确'}\\n\\n`;\n  }\n  \n  if (elements.outcome) {\n    markdown += `### O - 结局\\n${elements.outcome.terms?.join('、') || '未明确'}\\n\\n`;\n  }\n  \n  // 添加检索式\n  markdown += `## 检索式\\n\\n`;\n  markdown += `### PubMed\\n\\`\\`\\`\\n${result.search_queries.pubmed?.query || '生成失败'}\\n\\`\\`\\`\\n`;\n  markdown += `预估结果：${result.search_queries.pubmed?.estimated_results || '未知'}\\n\\n`;\n  \n  markdown += `### EMBASE\\n\\`\\`\\`\\n${result.search_queries.embase?.query || '生成失败'}\\n\\`\\`\\`\\n`;\n  markdown += `预估结果：${result.search_queries.embase?.estimated_results || '未知'}\\n\\n`;\n  \n  markdown += `### Cochrane Library\\n\\`\\`\\`\\n${result.search_queries.cochrane?.query || '生成失败'}\\n\\`\\`\\`\\n`;\n  markdown += `预估结果：${result.search_queries.cochrane?.estimated_results || '未知'}\\n\\n`;\n  \n  // 添加检索建议\n  if (result.search_queries.search_tips?.length > 0) {\n    markdown += `## 检索建议\\n`;\n    result.search_queries.search_tips.forEach((tip, i) => {\n      markdown += `${i + 1}. ${tip}\\n`;\n    });\n  }\n  \n  return {\n    json: result,\n    markdown: markdown\n  };\n}",
+      "next_nodes": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "title": "结束",
+      "outputs": [
+        {
+          "name": "result",
+          "type": "object",
+          "value": "{{format_output.json}}"
+        },
+        {
+          "name": "markdown",
+          "type": "string",
+          "value": "{{format_output.markdown}}"
+        }
+      ]
+    }
+  ],
+  "variables": []
+}

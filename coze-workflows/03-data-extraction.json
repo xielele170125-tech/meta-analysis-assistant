@@ -1,0 +1,71 @@
+{
+  "name": "文献数据提取",
+  "description": "从文献内容中提取Meta分析所需的结构化数据",
+  "version": "1.0.0",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "title": "开始",
+      "inputs": [
+        {
+          "name": "literature_content",
+          "type": "string",
+          "required": true,
+          "description": "文献全文或摘要内容"
+        },
+        {
+          "name": "research_question",
+          "type": "string",
+          "required": false,
+          "description": "研究问题（用于指导提取）"
+        },
+        {
+          "name": "outcome_of_interest",
+          "type": "string",
+          "required": false,
+          "description": "关注的结局指标（可选）"
+        }
+      ]
+    },
+    {
+      "id": "extract_data",
+      "type": "llm",
+      "title": "提取数据",
+      "model": "deepseek-reasoner",
+      "temperature": 0.1,
+      "prompt": {
+        "system": "你是一位专业的Meta分析数据提取专家。请从以下文献内容中仔细提取Meta分析所需的数据。\n\n## 重要说明\n请**严格按照文献原文**提取数据，保留原始的指标名称和数值。如果文献中有表格，请仔细阅读表格的行列标题。\n\n## 数据提取指南\n\n### 1. 研究标识\n- 研究名称：通常是\"第一作者(年份)\"格式\n\n### 2. 样本量（必填）\n请提取以下信息，并**保留原始名称**：\n- 治疗组/实验组样本量及名称：例如\"胚胎总数\"、\"周期数\"、\"患者数\"等\n- 对照组样本量及名称\n\n### 3. 数据类型判断\n根据文献报告的数据类型，选择合适的提取方式：\n- 连续型变量（均值±标准差）\n- 二分类变量（事件数/总数）\n- 已计算的效应量（OR/RR/HR等）\n\n### 4. 结局指标处理（重要！）\n\n#### 4.1 结局指标标准化\n不同文献可能用不同名称表示相同含义的指标，请进行标准化：\n\n**标准化对照表：**\n| 原始名称可能的形式 | 标准化名称 |\n|------------------|-----------||\n| 非整倍体率、染色体异常率、非整倍体发生率、aneuploidy rate | 非整倍体率 |\n| 临床妊娠率、妊娠率、clinical pregnancy rate | 临床妊娠率 |\n| 生化妊娠率、生化率 | 生化妊娠率 |\n| 流产率、自然流产率 | 流产率 |\n| 活产率、活产成功率 | 活产率 |\n| 种植率、着床率、implantation rate | 种植率 |\n| 卵裂率、分裂率 | 卵裂率 |\n| 受精率、正常受精率 | 受精率 |\n| 优胚率、优质胚胎率 | 优胚率 |\n| 囊胚形成率、囊胚率 | 囊胚形成率 |\n\n- 请保留原始名称（outcome_type_raw）\n- 同时提供标准化名称（outcome_type_standardized）\n- 如果不在上述对照表中，请根据含义自行标准化\n\n#### 4.2 亚组识别\n如果同一文献报告了多个相同结局指标但针对不同人群/分组，请识别亚组：\n\n**常见亚组类型：**\n- 年龄分组：高龄组(≥35岁) vs 年轻组(<35岁)\n- 周期类型：首次周期 vs 重复周期\n- 胚胎类型：囊胚 vs 卵裂胚\n- 卵子来源：自卵 vs 供卵\n- 精子来源：自精 vs 供精\n- 其他特定分组\n\n### 5. 数据提取注意事项\n- 如果文献包含多个不同的结局指标，请分别提取\n- 如果文献包含同一指标的不同亚组，也要分别提取并标注亚组信息\n- 如果表格中数据缺失，填null并在notes中说明\n- 注意区分\"干预组\"和\"对照组\"，不要搞反\n- 对于比率数据，样本量是分母，事件数是分子\n\n## JSON输出格式\n请严格按照以下格式输出：\n\n```json\n{\n  \"studies\": [\n    {\n      \"study_name\": \"作者(年份)\",\n      \"sample_size_treatment\": 数字,\n      \"sample_size_treatment_name\": \"样本量名称\",\n      \"sample_size_control\": 数字,\n      \"sample_size_control_name\": \"样本量名称\",\n      \"mean_treatment\": 数字或null,\n      \"sd_treatment\": 数字或null,\n      \"mean_control\": 数字或null,\n      \"sd_control\": 数字或null,\n      \"events_treatment\": 数字或null,\n      \"events_treatment_name\": \"事件名称\",\n      \"events_control\": 数字或null,\n      \"events_control_name\": \"事件名称\",\n      \"outcome_type\": \"标准化结局指标名称\",\n      \"outcome_type_raw\": \"原始结局指标名称\",\n      \"outcome_type_standardized\": \"标准化结局指标名称\",\n      \"subgroup\": \"亚组名称或null\",\n      \"subgroup_detail\": \"亚组详细描述或null\",\n      \"confidence\": 0.0-1.0,\n      \"notes\": \"备注或null\"\n    }\n  ]\n}\n```",
+        "user": "研究问题：{{start.research_question}}\n{{#if start.outcome_of_interest}}关注的结局指标：{{start.outcome_of_interest}}{{/if}}\n\n请提取以下文献的数据：\n\n---\n{{start.literature_content}}\n---"
+      },
+      "output_parser": "json",
+      "next_nodes": ["validate_data"]
+    },
+    {
+      "id": "validate_data",
+      "type": "code",
+      "title": "验证和格式化数据",
+      "language": "javascript",
+      "code": "async function main({ extract_data, start }) {\n  const studies = extract_data.studies || [];\n  \n  // 验证数据完整性\n  const validatedStudies = studies.map((study, index) => {\n    const warnings = [];\n    \n    // 检查必填字段\n    if (!study.sample_size_treatment || !study.sample_size_control) {\n      warnings.push('样本量缺失');\n    }\n    \n    // 检查数据类型一致性\n    const hasContinuousData = study.mean_treatment && study.sd_treatment;\n    const hasDichotomousData = study.events_treatment !== null;\n    \n    if (!hasContinuousData && !hasDichotomousData) {\n      warnings.push('未提取到有效数据');\n    }\n    \n    // 计算效应量（如果原始数据存在）\n    let effectSize = null;\n    let standardError = null;\n    \n    if (hasDichotomousData) {\n      // 二分类数据：计算RR和SE\n      const rate_t = study.events_treatment / study.sample_size_treatment;\n      const rate_c = study.events_control / study.sample_size_control;\n      effectSize = Math.log(rate_t / rate_c); // log(RR)\n      standardError = Math.sqrt(\n        (1 / study.events_treatment) - \n        (1 / study.sample_size_treatment) + \n        (1 / study.events_control) - \n        (1 / study.sample_size_control)\n      );\n    }\n    \n    return {\n      ...study,\n      index: index + 1,\n      warnings: warnings.length > 0 ? warnings : undefined,\n      calculated_effect_size: effectSize,\n      calculated_se: standardError,\n      data_type: hasContinuousData ? 'continuous' : 'dichotomous'\n    };\n  });\n  \n  // 生成Markdown表格\n  let markdown = `# 数据提取结果\\n\\n`;\n  markdown += `## 提取概览\\n\\n`;\n  markdown += `- 提取研究数：${validatedStudies.length}\\n`;\n  markdown += `- 数据类型：${[...new Set(validatedStudies.map(s => s.data_type))].join('、')}\\n`;\n  markdown += `- 结局指标：${[...new Set(validatedStudies.map(s => s.outcome_type_standardized || s.outcome_type))].join('、')}\\n\\n`;\n  \n  // 数据表格\n  markdown += `## 提取数据表\\n\\n`;\n  markdown += `| 研究 | 结局指标 | 干预组 | 对照组 | 效应量(95%CI) | 置信度 |\\n`;\n  markdown += `|------|---------|--------|--------|--------------|--------|\\n`;\n  \n  validatedStudies.forEach(study => {\n    const intervention = study.data_type === 'dichotomous' \n      ? `${study.events_treatment}/${study.sample_size_treatment}`\n      : `${study.mean_treatment}±${study.sd_treatment}`;\n    const control = study.data_type === 'dichotomous'\n      ? `${study.events_control}/${study.sample_size_control}`\n      : `${study.mean_control}±${study.sd_control}`;\n    \n    let effectDisplay = '-';\n    if (study.calculated_effect_size && study.calculated_se) {\n      const ciLower = study.calculated_effect_size - 1.96 * study.calculated_se;\n      const ciUpper = study.calculated_effect_size + 1.96 * study.calculated_se;\n      effectDisplay = `${Math.exp(study.calculated_effect_size).toFixed(2)} (${Math.exp(ciLower).toFixed(2)}-${Math.exp(ciUpper).toFixed(2)})`;\n    }\n    \n    markdown += `| ${study.study_name} | ${study.outcome_type_standardized || study.outcome_type} | ${intervention} | ${control} | ${effectDisplay} | ${(study.confidence * 100).toFixed(0)}% |\\n`;\n  });\n  \n  // 警告信息\n  const studiesWithWarnings = validatedStudies.filter(s => s.warnings && s.warnings.length > 0);\n  if (studiesWithWarnings.length > 0) {\n    markdown += `\\n## ⚠️ 数据完整性警告\\n\\n`;\n    studiesWithWarnings.forEach(study => {\n      markdown += `- **${study.study_name}**: ${study.warnings.join('、')}\\n`;\n    });\n  }\n  \n  return {\n    json: {\n      studies: validatedStudies,\n      summary: {\n        total: validatedStudies.length,\n        by_outcome: validatedStudies.reduce((acc, s) => {\n          const outcome = s.outcome_type_standardized || s.outcome_type;\n          acc[outcome] = (acc[outcome] || 0) + 1;\n          return acc;\n        }, {}),\n        by_data_type: validatedStudies.reduce((acc, s) => {\n          acc[s.data_type] = (acc[s.data_type] || 0) + 1;\n          return acc;\n        }, {})\n      }\n    },\n    markdown\n  };\n}",
+      "next_nodes": ["end"]
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "title": "结束",
+      "outputs": [
+        {
+          "name": "data",
+          "type": "object",
+          "value": "{{validate_data.json}}"
+        },
+        {
+          "name": "markdown",
+          "type": "string",
+          "value": "{{validate_data.markdown}}"
+        }
+      ]
+    }
+  ],
+  "variables": []
+}
