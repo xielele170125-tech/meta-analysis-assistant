@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseClient } from '@/storage/database/supabase-client';
 import { S3Storage } from 'coze-coding-dev-sdk';
+import * as pdfParse from 'pdf-parse';
 
 // 初始化存储
 const storage = new S3Storage({
@@ -10,6 +11,124 @@ const storage = new S3Storage({
   bucketName: process.env.COZE_BUCKET_NAME,
   region: 'cn-beijing',
 });
+
+/**
+ * 从PDF内容中提取元数据（DOI、标题、作者）
+ */
+async function extractPdfMetadata(buffer: Buffer): Promise<{
+  doi?: string;
+  title?: string;
+  authors?: string[];
+  abstract?: string;
+}> {
+  try {
+    const data = await (pdfParse as any).default(buffer, { max: 3 }); // 只解析前3页
+    const text = data.text || '';
+    const firstPage = text.split('\f')[0] || text; // 第一页内容
+    
+    console.log('[PDF Metadata] First page length:', firstPage.length);
+    
+    // 提取 DOI（支持多种格式）
+    const doiPatterns = [
+      /doi[:\s]*([10]\.\d{4,}\/[^\s\n\r]+)/i,
+      /https?:\/\/(?:dx\.)?doi\.org\/([10]\.\d{4,}\/[^\s\n\r]+)/i,
+      /\b(10\.\d{4,}\/[^\s\n\r]+)\b/i,
+    ];
+    
+    for (const pattern of doiPatterns) {
+      const match = firstPage.match(pattern);
+      if (match) {
+        let doi = match[1].replace(/[)\]>}.,;:]+$/, ''); // 清理尾部标点
+        console.log('[PDF Metadata] Found DOI:', doi);
+        return { doi };
+      }
+    }
+    
+    // 提取标题（通常在前几行，字体较大）
+    const lines = firstPage.split('\n').filter((l: string) => l.trim().length > 10);
+    if (lines.length > 0) {
+      // 标题通常是第一个较长的非空行
+      let title = lines[0].trim();
+      // 清理标题
+      title = title.replace(/^\d+[\.\-\s]*/, '').trim();
+      // 如果标题太短，尝试下一行
+      if (title.length < 20 && lines.length > 1) {
+        title = lines[1].trim();
+      }
+      console.log('[PDF Metadata] Extracted title:', title.substring(0, 100));
+      
+      // 提取作者（标题后面，通常有特殊格式）
+      const authors: string[] = [];
+      const authorSection = firstPage.substring(0, 2000); // 前2000字符
+      
+      // 常见作者格式匹配
+      // 1. 姓名格式：Zhang San, Li Si, Wang Wu
+      // 2. 带上标格式：Zhang San¹, Li Si²
+      // 3. 带 and/or：Zhang San and Li Si
+      const authorPatterns = [
+        // 带数字上标的作者列表
+        /(?:Authors?[:\s]*|By\s+)([A-Z][a-z]+\s+[A-Z][a-z]+(?:\s*[†¹²³⁴⁵*]?\s*,\s*[A-Z][a-z]+\s+[A-Z][a-z]+)*)/i,
+        // 中文章节后的作者
+        /(?:作者|Author)[：:\s]*([^\n]+)/,
+        // 多个作者用逗号分隔
+        /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?(?:\s*,\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)*)\s*$/m,
+      ];
+      
+      for (const pattern of authorPatterns) {
+        const match = authorSection.match(pattern);
+        if (match) {
+          const authorStr = match[1]
+            .replace(/[†¹²³⁴⁵*]/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+          const authorList = authorStr.split(/,|;|and|&/i)
+            .map((a: string) => a.trim())
+            .filter((a: string) => a.length > 2 && a.length < 50);
+          if (authorList.length > 0) {
+            authors.push(...authorList);
+            break;
+          }
+        }
+      }
+      
+      if (authors.length > 0) {
+        console.log('[PDF Metadata] Extracted authors:', authors.slice(0, 3).join(', '));
+      }
+      
+      return { title, authors };
+    }
+    
+    return {};
+  } catch (error) {
+    console.error('[PDF Metadata] Extract error:', error);
+    return {};
+  }
+}
+
+/**
+ * 计算两个字符串的相似度（0-1）
+ */
+function calculateSimilarity(str1: string, str2: string): number {
+  const s1 = str1.toLowerCase().trim();
+  const s2 = str2.toLowerCase().trim();
+  
+  if (s1 === s2) return 1;
+  if (!s1 || !s2) return 0;
+  
+  // 使用简单的词重叠率计算
+  const words1 = new Set(s1.split(/\s+/).filter(w => w.length > 2));
+  const words2 = new Set(s2.split(/\s+/).filter(w => w.length > 2));
+  
+  if (words1.size === 0 || words2.size === 0) return 0;
+  
+  let intersection = 0;
+  for (const w of words1) {
+    if (words2.has(w)) intersection++;
+  }
+  
+  const union = words1.size + words2.size - intersection;
+  return intersection / union;
+}
 
 interface AttachResult {
   total: number;
@@ -76,12 +195,19 @@ export async function POST(request: NextRequest) {
       records: [],
     };
 
+    // 获取所有文献，用于匹配
+    const { data: allLiterature } = await client
+      .from('literature')
+      .select('id, title, authors, year, doi')
+      .order('created_at', { ascending: false });
+
     for (const file of files) {
       try {
         const fileName = file.name;
         console.log(`[Attach PDF] Processing: ${fileName}`);
 
         let targetLiterature = null;
+        let pdfMetadata: { doi?: string; title?: string; authors?: string[] } = {};
 
         // 1. 如果指定了文献ID，直接使用
         if (literatureId) {
@@ -93,48 +219,179 @@ export async function POST(request: NextRequest) {
           targetLiterature = data;
         }
         
-        // 2. 否则尝试从文件名匹配文献
+        // 2. 尝试从PDF内容提取元数据进行匹配
         if (!targetLiterature) {
-          const searchTerms = extractSearchTerms(fileName);
+          // 读取PDF内容
+          const arrayBuffer = await file.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
           
-          if (searchTerms.doi) {
-            // 通过 DOI 精确匹配
-            const { data } = await client
-              .from('literature')
-              .select('id, title, authors, year')
-              .eq('doi', searchTerms.doi)
-              .maybeSingle();
-            targetLiterature = data;
+          // 提取PDF元数据
+          pdfMetadata = await extractPdfMetadata(buffer);
+          console.log(`[Attach PDF] Metadata for ${fileName}:`, pdfMetadata);
+          
+          // 2.1 优先用DOI精确匹配
+          if (pdfMetadata.doi && allLiterature) {
+            const doiLower = pdfMetadata.doi.toLowerCase();
+            targetLiterature = allLiterature.find(lit => 
+              lit.doi && lit.doi.toLowerCase() === doiLower
+            );
+            if (targetLiterature) {
+              console.log(`[Attach PDF] Matched by DOI: ${pdfMetadata.doi}`);
+            }
           }
           
-          if (!targetLiterature && searchTerms.title) {
-            // 通过标题模糊匹配，获取候选列表
-            const { data: candidates } = await client
-              .from('literature')
-              .select('id, title, authors, year')
-              .ilike('title', `%${searchTerms.title.substring(0, 50)}%`)
-              .limit(5);
+          // 2.2 用作者名匹配（至少一个作者名在文献作者字段中）
+          if (!targetLiterature && pdfMetadata.authors && pdfMetadata.authors.length > 0 && allLiterature) {
+            const candidates: Array<{ lit: any; score: number }> = [];
             
-            if (candidates && candidates.length === 1) {
-              // 只有一个候选，直接使用
-              targetLiterature = candidates[0];
-            } else if (candidates && candidates.length > 1) {
-              // 多个候选，需要用户选择
-              // 读取文件内容为 base64，以便稍后上传
-              const arrayBuffer = await file.arrayBuffer();
-              const base64 = Buffer.from(arrayBuffer).toString('base64');
+            for (const lit of allLiterature) {
+              if (!lit.authors) continue;
+              const litAuthors = lit.authors.toLowerCase();
+              let matchCount = 0;
               
-              result.pendingSelection++;
-              result.records.push({
-                fileName,
-                literatureId: null,
-                title: null,
-                status: 'pending_selection',
-                message: `找到 ${candidates.length} 个可能的匹配，请手动选择`,
-                candidates: candidates,
-                fileData: base64,
-              });
-              continue;
+              // 检查每个PDF作者是否在文献作者字段中
+              for (const pdfAuthor of pdfMetadata.authors) {
+                const lastName = pdfAuthor.split(/\s+/).pop()?.toLowerCase() || '';
+                const firstName = pdfAuthor.split(/\s+/)[0]?.toLowerCase() || '';
+                
+                // 匹配姓氏（更可靠）
+                if (lastName && litAuthors.includes(lastName)) {
+                  matchCount++;
+                }
+              }
+              
+              if (matchCount > 0) {
+                // 检查标题相似度作为辅助
+                if (pdfMetadata.title && lit.title) {
+                  const titleSimilarity = calculateSimilarity(pdfMetadata.title, lit.title);
+                  candidates.push({ lit, score: matchCount * 10 + titleSimilarity * 5 });
+                } else {
+                  candidates.push({ lit, score: matchCount * 10 });
+                }
+              }
+            }
+            
+            // 排序并选择最佳匹配
+            candidates.sort((a, b) => b.score - a.score);
+            
+            if (candidates.length === 1 && candidates[0].score >= 10) {
+              // 只有一个匹配，直接使用
+              targetLiterature = candidates[0].lit;
+              console.log(`[Attach PDF] Matched by authors: ${pdfMetadata.authors.join(', ')}`);
+            } else if (candidates.length > 1) {
+              // 多个候选，检查分数差距
+              const topScore = candidates[0].score;
+              const secondScore = candidates[1].score;
+              
+              if (topScore - secondScore >= 5) {
+                // 分数差距足够大，使用最佳匹配
+                targetLiterature = candidates[0].lit;
+                console.log(`[Attach PDF] Matched by authors (best score): ${topScore}`);
+              } else {
+                // 分数接近，需要用户选择
+                const base64 = buffer.toString('base64');
+                result.pendingSelection++;
+                result.records.push({
+                  fileName,
+                  literatureId: null,
+                  title: pdfMetadata.title || null,
+                  status: 'pending_selection',
+                  message: `找到 ${candidates.length} 个可能的匹配（作者匹配），请手动选择`,
+                  candidates: candidates.slice(0, 5).map(c => ({
+                    id: c.lit.id,
+                    title: c.lit.title,
+                    authors: c.lit.authors,
+                    year: c.lit.year,
+                  })),
+                  fileData: base64,
+                });
+                continue;
+              }
+            }
+          }
+          
+          // 2.3 用标题匹配
+          if (!targetLiterature && pdfMetadata.title && allLiterature) {
+            const candidates: Array<{ lit: any; score: number }> = [];
+            
+            for (const lit of allLiterature) {
+              if (!lit.title) continue;
+              const similarity = calculateSimilarity(pdfMetadata.title, lit.title);
+              if (similarity >= 0.4) {
+                candidates.push({ lit, score: similarity });
+              }
+            }
+            
+            candidates.sort((a, b) => b.score - a.score);
+            
+            if (candidates.length === 1 && candidates[0].score >= 0.7) {
+              targetLiterature = candidates[0].lit;
+              console.log(`[Attach PDF] Matched by title: ${pdfMetadata.title.substring(0, 50)}`);
+            } else if (candidates.length > 1) {
+              const topScore = candidates[0].score;
+              const secondScore = candidates[1].score;
+              
+              if (topScore >= 0.8 && topScore - secondScore >= 0.1) {
+                targetLiterature = candidates[0].lit;
+              } else {
+                // 多候选，需要用户选择
+                const base64 = buffer.toString('base64');
+                result.pendingSelection++;
+                result.records.push({
+                  fileName,
+                  literatureId: null,
+                  title: pdfMetadata.title || null,
+                  status: 'pending_selection',
+                  message: `找到 ${candidates.length} 个可能的匹配（标题匹配），请手动选择`,
+                  candidates: candidates.slice(0, 5).map(c => ({
+                    id: c.lit.id,
+                    title: c.lit.title,
+                    authors: c.lit.authors,
+                    year: c.lit.year,
+                  })),
+                  fileData: base64,
+                });
+                continue;
+              }
+            }
+          }
+          
+          // 2.4 最后尝试从文件名匹配
+          if (!targetLiterature) {
+            const searchTerms = extractSearchTerms(fileName);
+            
+            if (searchTerms.doi && allLiterature) {
+              const doiLower = searchTerms.doi.toLowerCase();
+              targetLiterature = allLiterature.find(lit => 
+                lit.doi && lit.doi.toLowerCase() === doiLower
+              );
+            }
+            
+            if (!targetLiterature && searchTerms.title && allLiterature) {
+              const { data: candidates } = await client
+                .from('literature')
+                .select('id, title, authors, year')
+                .ilike('title', `%${searchTerms.title.substring(0, 50)}%`)
+                .limit(5);
+              
+              if (candidates && candidates.length === 1) {
+                targetLiterature = candidates[0];
+              } else if (candidates && candidates.length > 1) {
+                const arrayBuffer2 = await file.arrayBuffer();
+                const base64 = Buffer.from(arrayBuffer2).toString('base64');
+                
+                result.pendingSelection++;
+                result.records.push({
+                  fileName,
+                  literatureId: null,
+                  title: null,
+                  status: 'pending_selection',
+                  message: `找到 ${candidates.length} 个可能的匹配，请手动选择`,
+                  candidates: candidates,
+                  fileData: base64,
+                });
+                continue;
+              }
             }
           }
         }
@@ -194,14 +451,22 @@ export async function POST(request: NextRequest) {
         }
 
         // 上传 PDF 到对象存储
-        const arrayBuffer = await file.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
+        // 注意：如果已经提取过元数据，buffer 已存在；否则需要重新读取
+        let uploadBuffer: Buffer;
+        if (literatureId && !pdfMetadata.doi && !pdfMetadata.title) {
+          // 指定了文献ID但未提取PDF元数据的情况
+          const arrayBuffer = await file.arrayBuffer();
+          uploadBuffer = Buffer.from(arrayBuffer);
+        } else {
+          // 已经读取过buffer（用于元数据提取）
+          uploadBuffer = Buffer.from(await file.arrayBuffer());
+        }
         
         const timestamp = Date.now();
         const storageKey = `literature/${timestamp}_${fileName}`;
         
         const key = await storage.uploadFile({
-          fileContent: buffer,
+          fileContent: uploadBuffer,
           fileName: storageKey,
           contentType: file.type || 'application/pdf',
         });
