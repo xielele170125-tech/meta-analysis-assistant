@@ -242,6 +242,13 @@ export default function Home() {
   const [showQualityDialog, setShowQualityDialog] = useState(false);
   const [assessingLiterature, setAssessingLiterature] = useState<string | null>(null);
   const [selectedScaleType, setSelectedScaleType] = useState<'rob2' | 'nos'>('rob2');
+  // 批量质量评分状态
+  const [batchAssessing, setBatchAssessing] = useState(false);
+  const [batchAssessProgress, setBatchAssessProgress] = useState<{
+    total: number;
+    completed: number;
+    current: string;
+  } | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -526,6 +533,73 @@ export default function Home() {
       alert('质量评分失败');
     } finally {
       setAssessingLiterature(null);
+    }
+  };
+
+  // 批量质量评分
+  const batchAssessQuality = async (scaleType: 'rob2' | 'nos') => {
+    if (!apiKey) {
+      alert('请先设置 DeepSeek API Key');
+      return;
+    }
+    
+    // 筛选出已完成但未评分的文献
+    const completedLiterature = literature.filter(
+      lit => lit.status === 'completed' && selectedLiteratureIds.includes(lit.id)
+    );
+    
+    if (completedLiterature.length === 0) {
+      alert('请选择已处理完成的文献进行评分');
+      return;
+    }
+    
+    setBatchAssessing(true);
+    setBatchAssessProgress({ total: completedLiterature.length, completed: 0, current: '' });
+    
+    let successCount = 0;
+    let failCount = 0;
+    
+    for (let i = 0; i < completedLiterature.length; i++) {
+      const lit = completedLiterature[i];
+      setBatchAssessProgress({ 
+        total: completedLiterature.length, 
+        completed: i, 
+        current: lit.title || lit.id.slice(0, 8) 
+      });
+      
+      try {
+        const res = await fetch('/api/quality-assessment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ literatureId: lit.id, scaleType, apiKey }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          successCount++;
+        } else {
+          console.error(`Assess ${lit.title} failed:`, data.error);
+          failCount++;
+        }
+      } catch (error) {
+        console.error(`Assess ${lit.title} error:`, error);
+        failCount++;
+      }
+    }
+    
+    // 刷新评分列表
+    await loadQualityAssessments();
+    
+    setBatchAssessProgress({ 
+      total: completedLiterature.length, 
+      completed: completedLiterature.length, 
+      current: '' 
+    });
+    setBatchAssessing(false);
+    
+    if (failCount === 0) {
+      alert(`批量评分完成：成功 ${successCount} 篇`);
+    } else {
+      alert(`批量评分完成：成功 ${successCount} 篇，失败 ${failCount} 篇`);
     }
   };
 
@@ -1046,12 +1120,45 @@ export default function Home() {
                       <div className="flex items-center justify-between mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
                         <span className="text-sm text-blue-700 dark:text-blue-300">
                           已选择 {selectedLiteratureIds.length} 篇文献
+                          {batchAssessing && batchAssessProgress && (
+                            <span className="ml-2">
+                              (评分中 {batchAssessProgress.completed}/{batchAssessProgress.total})
+                            </span>
+                          )}
                         </span>
-                        <div className="flex gap-2">
-                          <Button variant="outline" size="sm" onClick={() => setSelectedLiteratureIds([])}>
+                        <div className="flex gap-2 items-center">
+                          {/* 批量质量评分 */}
+                          <div className="flex items-center gap-2 mr-2">
+                            <Select 
+                              value={selectedScaleType} 
+                              onValueChange={(v) => setSelectedScaleType(v as 'rob2' | 'nos')}
+                              disabled={batchAssessing}
+                            >
+                              <SelectTrigger className="w-32 h-8">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="rob2">RoB 2.0</SelectItem>
+                                <SelectItem value="nos">NOS量表</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <Button 
+                              size="sm" 
+                              onClick={() => batchAssessQuality(selectedScaleType)}
+                              disabled={batchAssessing}
+                            >
+                              {batchAssessing ? (
+                                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                              ) : (
+                                <ClipboardCheck className="h-4 w-4 mr-1" />
+                              )}
+                              批量评分
+                            </Button>
+                          </div>
+                          <Button variant="outline" size="sm" onClick={() => setSelectedLiteratureIds([])} disabled={batchAssessing}>
                             取消选择
                           </Button>
-                          <Button variant="destructive" size="sm" onClick={deleteSelectedLiterature}>
+                          <Button variant="destructive" size="sm" onClick={deleteSelectedLiterature} disabled={batchAssessing}>
                             <Trash2 className="h-4 w-4 mr-1" />
                             删除选中
                           </Button>
