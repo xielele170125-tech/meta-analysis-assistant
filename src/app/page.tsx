@@ -560,7 +560,6 @@ export default function Home() {
           body: JSON.stringify({
             action: 'classify',
             dimensionId,
-            apiKey,
           }),
         });
         const data = await res.json();
@@ -679,10 +678,6 @@ export default function Home() {
       alert('请输入研究问题');
       return;
     }
-    if (!apiKey) {
-      alert('请先配置 DeepSeek API Key');
-      return;
-    }
 
     setRecommendingDimensions(true);
     try {
@@ -692,7 +687,6 @@ export default function Home() {
         body: JSON.stringify({
           action: 'recommend_dimensions',
           researchQuestion,
-          apiKey,
         }),
       });
       const data = await res.json();
