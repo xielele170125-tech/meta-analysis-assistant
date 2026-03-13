@@ -188,14 +188,23 @@ function extractXMLField(recordContent: string, tag: string): string {
     new RegExp(`<${tag}[^>]*><!\\[CDATA\\[([^\\]]*(?:\\][^\\]]*)*(?:\\]\\][^\\]]*)*)\\]\\]><\\/${tag}>`, 'i'),
     // 普通格式: <tag>value</tag>
     new RegExp(`<${tag}[^>]*>([^<]*)<\\/${tag}>`, 'i'),
-    // 自闭合或带属性的标签
+    // 带嵌套标签的格式（如EndNote的style标签）: <tag><style>value</style></tag>
     new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i'),
   ];
   
   for (const pattern of patterns) {
     const match = recordContent.match(pattern);
     if (match && match[1]) {
-      return match[1].trim();
+      // 移除所有内部标签（如<style>）并提取纯文本
+      const value = match[1]
+        .replace(/<style[^>]*>/gi, '')  // 移除style开始标签
+        .replace(/<\/style>/gi, '')      // 移除style结束标签
+        .replace(/<[^>]+>/g, '')         // 移除其他内部标签
+        .trim();
+      
+      if (value) {
+        return value;
+      }
     }
   }
   return '';
