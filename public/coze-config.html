@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Coze工作流配置工具 - 一键复制所有Prompt</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2em;
+        }
+        
+        .subtitle {
+            color: rgba(255,255,255,0.9);
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 1.1em;
+        }
+        
+        .workflow-card {
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        
+        .workflow-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+        
+        .workflow-number {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.2em;
+            margin-right: 15px;
+        }
+        
+        .workflow-title {
+            font-size: 1.3em;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .workflow-desc {
+            color: #666;
+            margin-bottom: 15px;
+            font-size: 0.95em;
+        }
+        
+        .node-section {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 15px;
+        }
+        
+        .node-title {
+            font-size: 1.1em;
+            font-weight: 600;
+            color: #444;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .node-title::before {
+            content: "🔧";
+            margin-right: 8px;
+        }
+        
+        .prompt-box {
+            background: #fff;
+            border: 2px solid #e1e4e8;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+            position: relative;
+        }
+        
+        .prompt-label {
+            font-size: 0.85em;
+            color: #666;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+        
+        .prompt-content {
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.9em;
+            line-height: 1.5;
+            color: #333;
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        .copy-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9em;
+            margin-top: 10px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .copy-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        .copy-btn:active {
+            transform: translateY(0);
+        }
+        
+        .copy-btn.copied {
+            background: #28a745;
+        }
+        
+        .tips-box {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+        }
+        
+        .tips-title {
+            font-weight: 600;
+            color: #856404;
+            margin-bottom: 8px;
+        }
+        
+        .tips-content {
+            color: #856404;
+            font-size: 0.9em;
+            line-height: 1.6;
+        }
+        
+        .nav-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        
+        .nav-tab {
+            background: rgba(255,255,255,0.9);
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 0.95em;
+            transition: all 0.3s;
+            font-weight: 500;
+        }
+        
+        .nav-tab:hover {
+            background: white;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        
+        .nav-tab.active {
+            background: white;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .instruction-box {
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        
+        .instruction-step {
+            display: flex;
+            margin-bottom: 15px;
+            align-items: flex-start;
+        }
+        
+        .step-number {
+            background: #667eea;
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 15px;
+            flex-shrink: 0;
+        }
+        
+        .step-content {
+            flex: 1;
+        }
+        
+        .step-title {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        
+        .step-desc {
+            color: #666;
+            font-size: 0.9em;
+        }
+        
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 1.5em;
+            }
+            
+            .workflow-card {
+                padding: 16px;
+            }
+            
+            .nav-tab {
+                padding: 8px 16px;
+                font-size: 0.85em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎯 Coze工作流配置工具</h1>
+        <p class="subtitle">一键复制所有Prompt，快速创建工作流</p>
+        
+        <!-- 导航标签 -->
+        <div class="nav-tabs">
+            <button class="nav-tab active" onclick="showTab('quick-start')">⚡ 快速开始</button>
+            <button class="nav-tab" onclick="showTab('workflow1')">1️⃣ 检索式生成</button>
+            <button class="nav-tab" onclick="showTab('workflow2')">2️⃣ 文献初筛</button>
+            <button class="nav-tab" onclick="showTab('workflow3')">3️⃣ 数据提取</button>
+            <button class="nav-tab" onclick="showTab('workflow4')">4️⃣ 质量评估</button>
+            <button class="nav-tab" onclick="showTab('workflow5')">5️⃣ Meta分析</button>
+        </div>
+        
+        <!-- 快速开始指南 -->
+        <div id="quick-start" class="tab-content">
+            <div class="instruction-box">
+                <h2 style="margin-bottom: 20px; color: #333;">📋 创建第一个工作流的步骤</h2>
+                
+                <div class="instruction-step">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <div class="step-title">创建Bot</div>
+                        <div class="step-desc">
+                            访问 <a href="https://www.coze.cn" target="_blank">https://www.coze.cn</a> → 创建Bot → 名称填写"Meta分析助手"
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="instruction-step">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <div class="step-title">创建工作流</div>
+                        <div class="step-desc">
+                            左侧菜单 → 工作流 → 创建 → 名称填写"search_query_generation"
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="instruction-step">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <div class="step-title">配置输入变量</div>
+                        <div class="step-desc">
+                            在开始节点添加两个变量：<br>
+                            - research_question (String, 必填)<br>
+                            - search_strategy (String, 默认: precise)
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="instruction-step">
+                    <div class="step-number">4</div>
+                    <div class="step-content">
+                        <div class="step-title">添加LLM节点</div>
+                        <div class="step-desc">
+                            点击"+ 添加节点" → 选择"LLM" → 点击下方对应工作流标签，复制Prompt粘贴即可
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="instruction-step">
+                    <div class="step-number">5</div>
+                    <div class="step-content">
+                        <div class="step-title">连接并测试</div>
+                        <div class="step-desc">
+                            连接开始节点到LLM节点 → 保存 → 测试运行
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="tips-box">
+                <div class="tips-title">💡 提示</div>
+                <div class="tips-content">
+                    点击上方的工作流标签，可以直接复制对应工作流的所有Prompt配置。<br>
+                    建议先从"检索式生成"工作流开始，熟悉流程后再创建其他工作流。
+                </div>
+            </div>
+        </div>
+        
+        <!-- 工作流1：检索式生成 -->
+        <div id="workflow1" class="tab-content hidden">
+            <div class="workflow-card">
+                <div class="workflow-header">
+                    <div class="workflow-number">1</div>
+                    <div class="workflow-title">文献检索式生成</div>
+                </div>
+                <p class="workflow-desc">根据研究问题自动生成PubMed/EMBASE等数据库的专业检索式</p>
+                
+                <!-- 节点1：解析研究框架 -->
+                <div class="node-section">
+                    <div class="node-title">节点1：解析研究框架</div>
+                    
+                    <div class="prompt-box">
+                        <div class="prompt-label">System Prompt:</div>
+                        <div class="prompt-content" id="w1-sys1">你是一位循证医学专家，精通多种研究问题框架。
+
+## 常见研究框架
+
+### 1. PICO（干预性研究）
+- P (Population): 研究人群
+- I (Intervention): 干预措施
+- C (Comparison): 对照措施
+- O (Outcome): 结局指标
+
+### 2. PECO（暴露研究/观察性研究）
+- P (Population): 研究人群
+- E (Exposure): 暴露因素
+- C (Comparison): 对照/非暴露
+- O (Outcome): 结局指标
+
+### 3. SPIDER（定性/混合研究）
+- S (Sample): 样本
+- PI (Phenomenon of Interest): 感兴趣的现象
+- D (Design): 研究设计
+- E (Evaluation): 评估方法
+- R (Research type): 研究类型
+
+## 任务
+1. 首先判断研究问题属于哪种类型
+2. 提取相应的要素
+3. 如果问题宽泛，**主动推断和扩展**可能的要素
+4. 识别关键概念和同义词
+5. 提供相关的MeSH主题词
+
+【重要】即使问题不完整，也要尽可能推断和扩展，而不是返回空值。</div>
+                        <button class="copy-btn" onclick="copyPrompt('w1-sys1', this)">📋 复制 System Prompt</button>
+                    </div>
+                    
+                    <div class="prompt-box">
+                        <div class="prompt-label">User Prompt:</div>
+                        <div class="prompt-content" id="w1-user1">研究问题：{{start.research_question}}
+
+请分析研究类型，提取关键要素，并尽可能扩展相关概念。如果问题宽泛，请主动推断可能的PICO/PECO要素。</div>
+                        <button class="copy-btn" onclick="copyPrompt('w1-user1', this)">📋 复制 User Prompt</button>
+                    </div>
+                </div>
+                
+                <!-- 节点2：生成检索式 -->
+                <div class="node-section">
+                    <div class="node-title">节点2：生成检索式</div>
+                    
+                    <div class="prompt-box">
+                        <div class="prompt-label">System Prompt:</div>
+                        <div class="prompt-content" id="w1-sys2">你是一位资深的医学文献检索专家，精通各大生物医学数据库的检索语法。
+
+## 核心原则：精确性优先
+
+检索结果过多（如超过5000篇）会严重影响后续筛选工作。请生成**精确且可操作**的检索式。
+
+## 检索策略层次
+
+### 策略A：核心概念精确检索（推荐）
+- 仅组合最核心的2-3个概念
+- 使用AND连接核心概念
+- 使用[Title/Abstract]字段限定，提高精确性
+- 目标结果：100-2000篇
+
+### 策略B：敏感性检索
+- 使用更宽松的检索策略
+- 扩展同义词和主题词
+- 使用OR连接同义词
+- 目标结果：1000-5000篇
+
+### 策略C：研究类型限定
+- 在核心概念基础上添加研究类型过滤器
+- RCT过滤器、系统评价过滤器等
+- 目标结果：50-500篇
+
+## 限制结果数量的关键技巧
+
+1. **字段限定**：使用[Title/Abstract]而非全字段检索
+2. **概念筛选**：只组合最核心的概念，不必包含所有PICO要素
+3. **主题词限定**：使用[MeSH Terms]限定词
+4. **研究类型**：添加study type过滤器
+
+## 检索策略选择
+
+当前选择：{{start.search_strategy}}
+- precise → 使用策略A
+- sensitive → 使用策略B  
+- limited → 使用策略C
+
+## 输出要求
+
+请生成以下数据库的检索式：
+1. PubMed（使用MeSH主题词）
+2. EMBASE（使用EMTREE主题词）
+3. Cochrane Library
+
+返回纯JSON格式（不要markdown代码块）：
+{
+  "pubmed": {
+    "query": "完整检索式",
+    "mesh_terms": ["使用的MeSH词列表"],
+    "keywords": ["关键词列表"],
+    "estimated_results": "预估结果数量范围"
+  },
+  "embase": {
+    "query": "完整检索式",
+    "emtree_terms": ["EMTREE词列表"],
+    "keywords": ["关键词列表"],
+    "estimated_results": "预估结果数量范围"
+  },
+  "cochrane": {
+    "query": "完整检索式",
+    "keywords": ["关键词列表"],
+    "estimated_results": "预估结果数量范围"
+  },
+  "search_tips": ["检索建议1", "检索建议2"]
+}</div>
+                        <button class="copy-btn" onclick="copyPrompt('w1-sys2', this)">📋 复制 System Prompt</button>
+                    </div>
+                    
+                    <div class="prompt-box">
+                        <div class="prompt-label">User Prompt:</div>
+                        <div class="prompt-content" id="w1-user2">研究问题：{{start.research_question}}
+
+提取的要素：
+{{parse_framework.elements}}
+
+请生成精确的检索式，控制结果数量在合理范围内。</div>
+                        <button class="copy-btn" onclick="copyPrompt('w1-user2', this)">📋 复制 User Prompt</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 工作流2：文献初筛 -->
+        <div id="workflow2" class="tab-content hidden">
+            <div class="workflow-card">
+                <div class="workflow-header">
+                    <div class="workflow-number">2</div>
+                    <div class="workflow-title">文献AI初筛</div>
+                </div>
+                <p class="workflow-desc">使用AI根据研究问题对检索到的文献进行初步筛选</p>
+                
+                <div class="node-section">
+                    <div class="node-title">节点：生成筛选标准</div>
+                    
+                    <div class="prompt-box">
+                        <div class="prompt-label">System Prompt:</div>
+                        <div class="prompt-content" id="w2-sys1">你是一位循证医学专家，精通文献筛选工作。
+
+请根据研究问题，生成明确的纳入标准和排除标准。
+
+原则：
+1. 纳入标准要宽松，尽量保留可能有用的文献
+2. 排除标准要明确，只剔除完全不相关的
+3. 标准要具体可操作
+
+返回纯JSON格式：
+{
+  "inclusionCriteria": ["纳入标准1", "纳入标准2"],
+  "exclusionCriteria": ["排除标准1", "排除标准2"],
+  "keyTopics": ["关键主题词，用于快速判断"],
+  "studyDesigns": ["需要的研究类型"],
+  "populationKeywords": ["人群相关关键词"],
+  "interventionKeywords": ["干预相关关键词"],
+  "outcomeKeywords": ["结局相关关键词"]
+}</div>
+                        <button class="copy-btn" onclick="copyPrompt('w2-sys1', this)">📋 复制 System Prompt</button>
+                    </div>
+                    
+                    <div class="prompt-box">
+                        <div class="prompt-label">User Prompt:</div>
+                        <div class="prompt-content" id="w2-user1">研究问题：{{start.research_question}}
+
+请生成文献初筛标准。</div>
+                        <button class="copy-btn" onclick="copyPrompt('w2-user1', this)">📋 复制 User Prompt</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 工作流3：数据提取 -->
+        <div id="workflow3" class="tab-content hidden">
+            <div class="workflow-card">
+                <div class="workflow-header">
+                    <div class="workflow-number">3</div>
+                    <div class="workflow-title">文献数据提取</div>
+                </div>
+                <p class="workflow-desc">从文献内容中提取Meta分析所需的结构化数据</p>
+                
+                <div class="node-section">
+                    <div class="node-title">节点：提取数据</div>
+                    
+                    <div class="prompt-box">
+                        <div class="prompt-label">System Prompt (点击复制后需要在Coze中查看完整内容):</div>
+                        <div class="prompt-content" id="w3-sys1">你是一位专业的Meta分析数据提取专家。请从以下文献内容中仔细提取Meta分析所需的数据。
+
+## 重要说明
+请**严格按照文献原文**提取数据，保留原始的指标名称和数值。如果文献中有表格，请仔细阅读表格的行列标题。
+
+## 数据提取指南
+
+### 1. 研究标识
+- 研究名称：通常是"第一作者(年份)"格式
+
+### 2. 样本量（必填）
+请提取以下信息，并**保留原始名称**：
+- 治疗组/实验组样本量及名称：例如"胚胎总数"、"周期数"、"患者数"等
+- 对照组样本量及名称
+
+### 3. 数据类型判断
+根据文献报告的数据类型，选择合适的提取方式：
+- 连续型变量（均值±标准差）
+- 二分类变量（事件数/总数）
+- 已计算的效应量（OR/RR/HR等）
+
+### 4. 结局指标处理（重要！）
+
+#### 4.1 结局指标标准化
+不同文献可能用不同名称表示相同含义的指标，请进行标准化：
+
+**标准化对照表：**
+| 原始名称可能的形式 | 标准化名称 |
+|------------------|-----------||
+| 非整倍体率、染色体异常率、非整倍体发生率、aneuploidy rate | 非整倍体率 |
+| 临床妊娠率、妊娠率、clinical pregnancy rate | 临床妊娠率 |
+| 生化妊娠率、生化率 | 生化妊娠率 |
+| 流产率、自然流产率 | 流产率 |
+| 活产率、活产成功率 | 活产率 |
+| 种植率、着床率、implantation rate | 种植率 |
+| 卵裂率、分裂率 | 卵裂率 |
+| 受精率、正常受精率 | 受精率 |
+| 优胚率、优质胚胎率 | 优胚率 |
+| 囊胚形成率、囊胚率 | 囊胚形成率 |
+
+- 请保留原始名称（outcome_type_raw）
+- 同时提供标准化名称（outcome_type_standardized）
+- 如果不在上述对照表中，请根据含义自行标准化
+
+#### 4.2 亚组识别
+如果同一文献报告了多个相同结局指标但针对不同人群/分组，请识别亚组：
+
+**常见亚组类型：**
+- 年龄分组：高龄组(≥35岁) vs 年轻组(<35岁)
+- 周期类型：首次周期 vs 重复周期
+- 胚胎类型：囊胚 vs 卵裂胚
+- 卵子来源：自卵 vs 供卵
+- 精子来源：自精 vs 供精
+- 其他特定分组
+
+### 5. 数据提取注意事项
+- 如果文献包含多个不同的结局指标，请分别提取
+- 如果文献包含同一指标的不同亚组，也要分别提取并标注亚组信息
+- 如果表格中数据缺失，填null并在notes中说明
+- 注意区分"干预组"和"对照组"，不要搞反
+- 对于比率数据，样本量是分母，事件数是分子
+
+## JSON输出格式
+请严格按照以下格式输出：
+
+```json
+{
+  "studies": [
+    {
+      "study_name": "作者(年份)",
+      "sample_size_treatment": 数字,
+      "sample_size_treatment_name": "样本量名称",
+      "sample_size_control": 数字,
+      "sample_size_control_name": "样本量名称",
+      "mean_treatment": 数字或null,
+      "sd_treatment": 数字或null,
+      "mean_control": 数字或null,
+      "sd_control": 数字或null,
+      "events_treatment": 数字或null,
+      "events_treatment_name": "事件名称",
+      "events_control": 数字或null,
+      "events_control_name": "事件名称",
+      "outcome_type": "标准化结局指标名称",
+      "outcome_type_raw": "原始结局指标名称",
+      "outcome_type_standardized": "标准化结局指标名称",
+      "subgroup": "亚组名称或null",
+      "subgroup_detail": "亚组详细描述或null",
+      "confidence": 0.0-1.0,
+      "notes": "备注或null"
+    }
+  ]
+}
+```
+
+（完整内容请查看 PROMPTS.md 文件）</div>
+                        <button class="copy-btn" onclick="copyPrompt('w3-sys1', this)">📋 复制 System Prompt</button>
+                    </div>
+                    
+                    <div class="prompt-box">
+                        <div class="prompt-label">User Prompt:</div>
+                        <div class="prompt-content" id="w3-user1">研究问题：{{start.research_question}}
+{{#if start.outcome_of_interest}}关注的结局指标：{{start.outcome_of_interest}}{{/if}}
+
+请提取以下文献的数据：
+
+---
+{{start.literature_content}}
+---</div>
+                        <button class="copy-btn" onclick="copyPrompt('w3-user1', this)">📋 复制 User Prompt</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 工作流4：质量评估 -->
+        <div id="workflow4" class="tab-content hidden">
+            <div class="workflow-card">
+                <div class="workflow-header">
+                    <div class="workflow-number">4</div>
+                    <div class="workflow-title">文献质量评估</div>
+                </div>
+                <p class="workflow-desc">使用Cochrane RoB 2.0或Newcastle-Ottawa量表评估文献质量</p>
+                
+                <div class="tips-box">
+                    <div class="tips-title">⚠️ 重要提示</div>
+                    <div class="tips-content">
+                        质量评估工作流包含两个LLM节点（RCT研究用Cochrane RoB 2.0，观察性研究用Newcastle-Ottawa）。<br>
+                        完整Prompt内容较长，建议查看 PROMPTS.md 文件获取详细配置。
+                    </div>
+                </div>
+                
+                <div class="node-section">
+                    <div class="node-title">节点1：Cochrane RoB 2.0评估（RCT研究）</div>
+                    
+                    <div class="prompt-box">
+                        <div class="prompt-label">System Prompt (部分内容):</div>
+                        <div class="prompt-content" id="w4-sys1">你是一位专业的系统综述方法学专家。请根据Cochrane偏倚风险评估工具2.0版(RoB 2.0)对以下随机对照试验(RCT)进行质量评估。
+
+## RoB 2.0 评估域
+
+### 域1: 随机化过程 (D1)
+- D1.1 分配序列是否真正随机？
+- D1.2 分配序列是否被隐藏？
+- D1.3 基线特征是否平衡？
+
+判断标准：
+- 低风险(Low): 真正随机、分配隐藏、基线平衡
+- 有些担忧(Some concerns): 存在一些问题但不太可能严重影响结果
+- 高风险(High): 非随机、无分配隐藏、基线不平衡
+
+（完整内容包含所有5个域的详细评估标准，请查看 PROMPTS.md）</div>
+                        <button class="copy-btn" onclick="copyPrompt('w4-sys1', this)">📋 复制 System Prompt</button>
+                    </div>
+                    
+                    <div class="prompt-box">
+                        <div class="prompt-label">User Prompt:</div>
+                        <div class="prompt-content" id="w4-user1">请评估以下文献：
+
+---
+{{start.literature_content}}
+---</div>
+                        <button class="copy-btn" onclick="copyPrompt('w4-user1', this)">📋 复制 User Prompt</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 工作流5：Meta分析 -->
+        <div id="workflow5" class="tab-content hidden">
+            <div class="workflow-card">
+                <div class="workflow-header">
+                    <div class="workflow-number">5</div>
+                    <div class="workflow-title">Meta分析计算</div>
+                </div>
+                <p class="workflow-desc">执行固定/随机效应模型Meta分析，计算合并效应量和异质性</p>
+                
+                <div class="node-section">
+                    <div class="node-title">节点：解读分析结果</div>
+                    
+                    <div class="prompt-box">
+                        <div class="prompt-label">System Prompt:</div>
+                        <div class="prompt-content" id="w5-sys1">你是一位专业的循证医学专家，请解读Meta分析结果。
+
+## 解读要点
+
+### 1. 效应量解读
+根据效应量类型进行解读：
+- RR (相对风险)：RR&lt;1表示干预降低风险，RR&gt;1表示增加风险
+- OR (比值比)：OR&lt;1表示干预降低几率，OR&gt;1表示增加几率
+- HR (风险比)：HR&lt;1表示干预降低风险率
+- SMD (标准化均数差)：SMD&lt;0.2小效应，0.2-0.8中效应，&gt;0.8大效应
+- MD (均数差)：直接解释差异大小
+
+### 2. 异质性解读
+- I² &lt; 25%：低异质性
+- I² 25-50%：中等异质性
+- I² 50-75%：较高异质性
+- I² &gt; 75%：高异质性
+
+### 3. 统计学显著性
+- P &lt; 0.05：统计学显著
+- P ≥ 0.05：无统计学显著性
+
+### 4. 临床意义
+综合考虑效应量大小、置信区间、研究质量等因素
+
+## 输出格式
+
+请用通俗易懂的语言撰写解读报告，包含以下部分：
+
+```json
+{
+  "main_findings": "主要发现（2-3句话）",
+  "effect_interpretation": "效应量解读",
+  "heterogeneity_interpretation": "异质性解读",
+  "clinical_significance": "临床意义",
+  "limitations": ["局限性1", "局限性2"],
+  "conclusions": "结论"
+}
+```</div>
+                        <button class="copy-btn" onclick="copyPrompt('w5-sys1', this)">📋 复制 System Prompt</button>
+                    </div>
+                    
+                    <div class="prompt-box">
+                        <div class="prompt-label">User Prompt:</div>
+                        <div class="prompt-content" id="w5-user1">请解读以下Meta分析结果：
+
+模型类型：{{select_model.selected_model.model_type}}
+效应量类型：{{start.effect_measure}}
+合并效应量：{{select_model.selected_model.combined_effect}}
+95%置信区间：[{{select_model.selected_model.combined_ci_lower}}, {{select_model.selected_model.combined_ci_upper}}]
+P值：{{select_model.selected_model.combined_p_value}}
+异质性(I²)：{{select_model.selected_model.heterogeneity.I2}}
+异质性P值：{{select_model.selected_model.heterogeneity.p_value}}
+纳入研究数：{{validate_input.valid_studies_count}}</div>
+                        <button class="copy-btn" onclick="copyPrompt('w5-user1', this)">📋 复制 User Prompt</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // 切换标签
+        function showTab(tabId) {
+            // 隐藏所有内容
+            document.querySelectorAll('.tab-content').forEach(el => {
+                el.classList.add('hidden');
+            });
+            
+            // 移除所有标签的active状态
+            document.querySelectorAll('.nav-tab').forEach(el => {
+                el.classList.remove('active');
+            });
+            
+            // 显示选中的内容
+            document.getElementById(tabId).classList.remove('hidden');
+            
+            // 设置选中标签为active
+            event.target.classList.add('active');
+        }
+        
+        // 复制Prompt
+        function copyPrompt(elementId, button) {
+            const element = document.getElementById(elementId);
+            const text = element.textContent;
+            
+            navigator.clipboard.writeText(text).then(() => {
+                // 显示成功提示
+                const originalText = button.textContent;
+                button.textContent = '✅ 已复制！';
+                button.classList.add('copied');
+                
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.classList.remove('copied');
+                }, 2000);
+            }).catch(err => {
+                console.error('复制失败:', err);
+                alert('复制失败，请手动选择文本复制');
+            });
+        }
+    </script>
+</body>
+</html>
