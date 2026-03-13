@@ -207,8 +207,8 @@ export function LLMConfigManager() {
       apiKey: '', // 需要重新输入
       baseUrl: config.base_url || '',
       model: config.model,
-      temperature: config.temperature ?? 0.7,
-      maxTokens: config.max_tokens ?? 4096,
+      temperature: config.temperature !== null ? config.temperature : 0.7,
+      maxTokens: config.max_tokens !== null ? config.max_tokens : 4096,
       isDefault: config.is_default,
       isEnabled: config.is_enabled,
     });
@@ -280,25 +280,25 @@ export function LLMConfigManager() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card>
             <CardContent className="pt-6">
-              <div className="text-2xl font-bold">{stats.totalRequests}</div>
+              <div className="text-2xl font-bold">{stats.totalRequests || 0}</div>
               <div className="text-sm text-muted-foreground">总请求数</div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-6">
-              <div className="text-2xl font-bold">{stats.totalTokens.toLocaleString()}</div>
+              <div className="text-2xl font-bold">{(stats.totalTokens || 0).toLocaleString()}</div>
               <div className="text-sm text-muted-foreground">总Token数</div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-6">
-              <div className="text-2xl font-bold text-green-600">{stats.successCount}</div>
+              <div className="text-2xl font-bold text-green-600">{stats.successCount || 0}</div>
               <div className="text-sm text-muted-foreground">成功请求</div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-6">
-              <div className="text-2xl font-bold text-red-600">{stats.failureCount}</div>
+              <div className="text-2xl font-bold text-red-600">{stats.failureCount || 0}</div>
               <div className="text-sm text-muted-foreground">失败请求</div>
             </CardContent>
           </Card>
@@ -515,7 +515,10 @@ export function LLMConfigManager() {
                   max={2}
                   step={0.1}
                   value={form.temperature}
-                  onChange={(e) => setForm({ ...form, temperature: parseFloat(e.target.value) })}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value);
+                    setForm({ ...form, temperature: isNaN(val) ? 0.7 : val });
+                  }}
                 />
               </div>
               <div className="space-y-2">
@@ -525,7 +528,10 @@ export function LLMConfigManager() {
                   type="number"
                   min={1}
                   value={form.maxTokens}
-                  onChange={(e) => setForm({ ...form, maxTokens: parseInt(e.target.value) })}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value);
+                    setForm({ ...form, maxTokens: isNaN(val) ? 4096 : val });
+                  }}
                 />
               </div>
             </div>
