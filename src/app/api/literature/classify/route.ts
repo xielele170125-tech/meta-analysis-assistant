@@ -127,6 +127,13 @@ export async function POST(request: NextRequest) {
     // 执行AI分类（优化版：并行处理）
     if (action === 'classify') {
       const { dimensionId, literatureIds, forceReclassify } = body;
+      
+      console.log('[Classify] Request params:', { 
+        dimensionId, 
+        forceReclassify, 
+        forceReclassifyType: typeof forceReclassify,
+        hasLiteratureIds: !!literatureIds 
+      });
 
       // 获取分类维度
       const { data: dimension, error: dimError } = await client
@@ -158,8 +165,12 @@ export async function POST(request: NextRequest) {
       // 过滤出有标题的文献
       let validLiterature = (literatureList || []).filter(lit => lit.title);
       
+      console.log('[Classify] Valid literature count:', validLiterature.length);
+      console.log('[Classify] forceReclassify value:', forceReclassify, 'type:', typeof forceReclassify);
+      
       // 如果不是强制重新分类，排除已分类的文献
       if (!forceReclassify && (!literatureIds || literatureIds.length === 0)) {
+        console.log('[Classify] Checking for existing classifications...');
         const { data: existingClassifications } = await client
           .from('literature_classifications')
           .select('literature_id')
@@ -168,7 +179,9 @@ export async function POST(request: NextRequest) {
         const classifiedIds = new Set((existingClassifications || []).map(c => c.literature_id));
         validLiterature = validLiterature.filter(lit => !classifiedIds.has(lit.id));
         
-        console.log(`[Classify] Skipping ${classifiedIds.size} already classified literature`);
+        console.log(`[Classify] Skipping ${classifiedIds.size} already classified literature, ${validLiterature.length} remaining`);
+      } else {
+        console.log('[Classify] Force reclassify or specific literatureIds provided, processing all literature');
       }
 
       if (validLiterature.length === 0) {
