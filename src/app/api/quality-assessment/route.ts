@@ -337,20 +337,26 @@ export async function POST(request: NextRequest) {
 
     try {
       // 调用 DeepSeek API 进行评估
+      // 使用 deepseek-chat 模型，速度比 deepseek-reasoner 快5-10倍
       const openai = new OpenAI({
         apiKey: apiKey,
         baseURL: 'https://api.deepseek.com',
       });
 
       const response = await openai.chat.completions.create({
-        model: 'deepseek-reasoner',
+        model: 'deepseek-chat', // 使用快速模型
         messages: [
+          {
+            role: 'system',
+            content: '你是一位专业的系统综述方法学专家，请严格按照JSON格式输出评估结果。',
+          },
           {
             role: 'user',
             content: prompt + literature.raw_content.substring(0, 30000), // 限制内容长度
           },
         ],
         max_tokens: 4000,
+        temperature: 0.3, // 降低随机性，提高一致性
       });
 
       const content = response.choices[0]?.message?.content || '';
