@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
 
     // 执行AI分类（优化版：并行处理）
     if (action === 'classify') {
-      const { dimensionId, literatureIds } = body;
+      const { dimensionId, literatureIds, forceReclassify } = body;
 
       // 获取分类维度
       const { data: dimension, error: dimError } = await client
@@ -156,13 +156,31 @@ export async function POST(request: NextRequest) {
       }
 
       // 过滤出有标题的文献
-      const validLiterature = (literatureList || []).filter(lit => lit.title);
+      let validLiterature = (literatureList || []).filter(lit => lit.title);
+      
+      // 如果不是强制重新分类，排除已分类的文献
+      if (!forceReclassify && (!literatureIds || literatureIds.length === 0)) {
+        const { data: existingClassifications } = await client
+          .from('literature_classifications')
+          .select('literature_id')
+          .eq('dimension_id', dimensionId);
+        
+        const classifiedIds = new Set((existingClassifications || []).map(c => c.literature_id));
+        validLiterature = validLiterature.filter(lit => !classifiedIds.has(lit.id));
+        
+        console.log(`[Classify] Skipping ${classifiedIds.size} already classified literature`);
+      }
 
       if (validLiterature.length === 0) {
         return NextResponse.json({ 
-          error: '没有可分类的文献，请先导入文献', 
-          classified: 0 
-        }, { status: 400 });
+          success: true,
+          data: {
+            total: 0,
+            classified: 0,
+            results: [],
+            message: '所有文献已分类，如需重新分类请勾选"强制重新分类"'
+          }
+        });
       }
 
       console.log(`[Classify] Found ${validLiterature.length} literature for classification`);
@@ -383,26 +401,43 @@ async function batchClassifyLiterature(
   confidence: number;
   evidence: string;
 }>> {
-  // 构建文献列表文本（精简版）
+  // 构建文献列表文本 - 使用索引号作为标识
   const literatureText = literatureBatch.map((lit, idx) => {
-    // 只保留关键信息，减少token
     const contentPreview = lit.content.substring(0, 500);
-    return `[${idx + 1}] ID:${lit.id} | 标题:${lit.title} | ${lit.year || ''}年 | 内容:${contentPreview}`;
-  }).join('\n');
+    return `[文献${idx + 1}]
+标题: ${lit.title}
+年份: ${lit.year || '未知'}
+摘要: ${contentPreview}`;
+  }).join('\n\n');
 
   const systemPrompt = `你是医学文献分类专家。根据维度对文献分类。
 
-维度:${dimension.name}
-${dimension.description ? `说明:${dimension.description}` : ''}
-分类:${(dimension.categories as string[]).join('|')}
+分类维度: ${dimension.name}
+${dimension.description ? `说明: ${dimension.description}` : ''}
+可选分类: ${(dimension.categories as string[]).join('、')}
 
-返回JSON:{"results":[{"literatureId":"ID","category":"分类","confidence":0.8,"evidence":"依据"}]}`;
+重要规则:
+1. 每篇文献必须返回一个分类结果
+2. confidence表示分类置信度(0.0-1.0)，0.7以上表示确定，0.5-0.7表示可能，0.5以下表示不确定
+3. evidence是从文献中提取的判断依据
 
-  const userPrompt = `对${literatureBatch.length}篇文献分类:
+返回JSON格式:
+{
+  "results": [
+    {
+      "index": 1,
+      "category": "选择的分类",
+      "confidence": 0.8,
+      "evidence": "判断依据"
+    }
+  ]
+}`;
+
+  const userPrompt = `请对以下 ${literatureBatch.length} 篇文献进行分类：
 
 ${literatureText}
 
-返回JSON结果。`;
+请返回JSON格式的分类结果，每篇文献一个结果。`;
 
   const startTime = Date.now();
   
@@ -417,29 +452,48 @@ ${literatureText}
     });
 
     console.log(`[BatchClassify] LLM call completed in ${Date.now() - startTime}ms`);
+    console.log(`[BatchClassify] Response preview:`, response.content.substring(0, 300));
 
     const parsed = JSON.parse(response.content);
     const parsedResults = parsed.results || [];
     
-    // 验证并补充结果
-    const results = literatureBatch.map(lit => {
-      const found = parsedResults.find((r: any) => r.literatureId === lit.id);
+    console.log(`[BatchClassify] Parsed ${parsedResults.length} results from AI`);
+    
+    // 使用索引号匹配结果
+    const results = literatureBatch.map((lit, idx) => {
+      // 尝试用索引号匹配
+      const found = parsedResults.find((r: any) => r.index === idx + 1 || r.index === String(idx + 1));
+      
       if (found) {
         return {
           literatureId: lit.id,
           category: found.category || dimension.categories[0],
-          confidence: found.confidence || 0.5,
+          confidence: typeof found.confidence === 'number' ? found.confidence : 0.7,
           evidence: found.evidence || '',
         };
       }
+      
+      // 如果没找到，尝试从AI返回中按顺序匹配
+      const orderedResult = parsedResults[idx];
+      if (orderedResult) {
+        return {
+          literatureId: lit.id,
+          category: orderedResult.category || dimension.categories[0],
+          confidence: typeof orderedResult.confidence === 'number' ? orderedResult.confidence : 0.7,
+          evidence: orderedResult.evidence || '',
+        };
+      }
+      
       // 默认值
       return {
         literatureId: lit.id,
-        category: dimension.categories[dimension.categories.length - 1] || '未知',
-        confidence: 0.3,
-        evidence: '未找到分类结果',
+        category: dimension.categories[dimension.categories.length - 1] || '未分类',
+        confidence: 0.5,
+        evidence: '未能从AI获取分类结果',
       };
     });
+    
+    console.log(`[BatchClassify] Final results: ${results.length} items`);
     
     return results;
   } catch (error) {
@@ -447,9 +501,9 @@ ${literatureText}
     // 返回默认值
     return literatureBatch.map(lit => ({
       literatureId: lit.id,
-      category: dimension.categories[dimension.categories.length - 1] || '未知',
-      confidence: 0.2,
-      evidence: '分类失败',
+      category: dimension.categories[dimension.categories.length - 1] || '未分类',
+      confidence: 0.3,
+      evidence: '分类处理失败',
     }));
   }
 }

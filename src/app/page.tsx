@@ -266,6 +266,7 @@ export default function Home() {
   const [selectedDimensionsForBatch, setSelectedDimensionsForBatch] = useState<string[]>([]);
   const [batchClassifying, setBatchClassifying] = useState(false);
   const [batchClassifyProgress, setBatchClassifyProgress] = useState<{current: number; total: number; currentName: string} | null>(null);
+  const [forceReclassify, setForceReclassify] = useState(false);
   const [showNewDimensionDialog, setShowNewDimensionDialog] = useState(false);
   const [newDimension, setNewDimension] = useState({ name: '', description: '', categories: '' });
   
@@ -560,6 +561,7 @@ export default function Home() {
           body: JSON.stringify({
             action: 'classify',
             dimensionId,
+            forceReclassify,
           }),
         });
         const data = await res.json();
@@ -2104,7 +2106,7 @@ export default function Home() {
                   <div className="space-y-3">
                     {/* 批量操作栏 */}
                     {classificationDimensions.length > 0 && (
-                      <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+                      <div className="flex items-center flex-wrap gap-3 p-3 bg-slate-50 rounded-lg">
                         <Checkbox
                           checked={selectedDimensionsForBatch.length === classificationDimensions.length}
                           onCheckedChange={(checked) => {
@@ -2118,6 +2120,16 @@ export default function Home() {
                         <span className="text-sm text-slate-600">
                           全选 ({selectedDimensionsForBatch.length}/{classificationDimensions.length})
                         </span>
+                        <div className="flex items-center gap-2 ml-4">
+                          <Checkbox
+                            id="forceReclassify"
+                            checked={forceReclassify}
+                            onCheckedChange={(checked) => setForceReclassify(checked as boolean)}
+                          />
+                          <label htmlFor="forceReclassify" className="text-sm text-slate-600 cursor-pointer">
+                            强制重新分类
+                          </label>
+                        </div>
                         {selectedDimensionsForBatch.length > 0 && (
                           <>
                             <Button
