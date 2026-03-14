@@ -39,10 +39,29 @@ export async function POST(request: NextRequest) {
       returnUrl: `${process.env.NEXT_PUBLIC_APP_URL}/payment/success`,
     };
 
+    // 调试日志 - 输出环境变量状态（不输出敏感值）
+    console.log('[易支付] 环境变量检查:', {
+      YIPAY_API_URL: config.apiUrl ? `✅ 已设置 (${config.apiUrl})` : '❌ 未设置',
+      YIPAY_PID: config.pid ? `✅ 已设置 (${config.pid})` : '❌ 未设置',
+      YIPAY_KEY: config.key ? '✅ 已设置 (已隐藏)' : '❌ 未设置',
+      NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL ? `✅ 已设置 (${process.env.NEXT_PUBLIC_APP_URL})` : '❌ 未设置',
+    });
+
     if (!config.apiUrl || !config.pid || !config.key) {
-      console.error('[易支付] 配置缺失');
+      console.error('[易支付] 配置缺失:', {
+        apiUrl: !!config.apiUrl,
+        pid: !!config.pid,
+        key: !!config.key,
+      });
       return NextResponse.json(
-        { error: '支付服务暂未配置，请联系管理员' },
+        { 
+          error: '支付服务暂未配置，请联系管理员',
+          debug: {
+            apiUrl: !!config.apiUrl,
+            pid: !!config.pid,
+            key: !!config.key,
+          }
+        },
         { status: 503 }
       );
     }
