@@ -280,7 +280,7 @@ export const zhCN = {
   // 付费系统
   payment: {
     unlock: '解锁完整功能',
-    lifetime: '终身使用',
+    lifetime: '终身使用，一次购买永久有效',
     oneTime: '一次购买，永久有效',
     pricing: {
       domestic: '¥9.9',
@@ -291,12 +291,19 @@ export const zhCN = {
       alipay: '支付宝',
       stripe: 'Stripe',
     },
+    wechat: '微信支付',
+    alipay: '支付宝',
     status: {
       free: '免费版',
       paid: '已解锁',
       pending: '待支付',
     },
     features: {
+      extraction: '无限次 AI 数据提取',
+      quality: '无限次质量评分评估',
+      export: '导出 Excel 和图片',
+      network: '网状 Meta 分析',
+      ai: 'AI 智能分类',
       unlimitedExtraction: '无限次 AI 数据提取',
       unlimitedQualityAssessment: '无限次质量评分评估',
       exportExcel: '导出 Excel 和图片',
@@ -314,14 +321,20 @@ export const zhCN = {
     instant: '即时生效',
     domestic: '国内支付',
     international: '国际支付',
-    email: '邮箱',
+    internationalDesc: 'One-time purchase, lifetime access',
+    email: '邮箱 (Email)',
     emailPlaceholder: 'your@email.com',
     emailForReceipt: '用于发送收据',
-    payNow: '立即购买',
+    buyNow: '立即购买',
+    payNow: '立即支付',
     waitingPayment: '等待支付中...',
+    scanQR: '请使用 {method} 扫码支付',
     scanQrCode: '请使用{method}扫码支付',
     orderNo: '订单号',
+    waiting: '等待支付中...',
+    testSuccess: '模拟支付成功',
     testMode: '[测试] 模拟支付成功',
+    openInNew: '在新窗口打开支付页面',
   },
 
   // 设置
