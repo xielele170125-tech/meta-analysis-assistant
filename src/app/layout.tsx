@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { PaymentWrapper } from '@/components/PaymentWrapper';
 
 export const metadata: Metadata = {
   title: {
@@ -42,7 +43,9 @@ export default function RootLayout({
   return (
     <html lang="zh" suppressHydrationWarning>
       <body className="antialiased">
-        {children}
+        <PaymentWrapper>
+          {children}
+        </PaymentWrapper>
       </body>
     </html>
   );

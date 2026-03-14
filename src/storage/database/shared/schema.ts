@@ -626,3 +626,110 @@ export const llmUsageLogs = pgTable(
 // LLM配置类型
 export type LLMConfig = typeof llmConfigs.$inferSelect;
 export type LLMUsageLog = typeof llmUsageLogs.$inferSelect;
+
+// ==================== 用户和付费相关表 ====================
+
+// 用户表（基于设备指纹识别）
+export const users = pgTable(
+  "users",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    // 设备指纹（用于识别用户）
+    deviceFingerprint: varchar("device_fingerprint", { length: 64 }).notNull().unique(),
+    // 邮箱（可选，用于找回购买记录）
+    email: varchar("email", { length: 255 }),
+    // 付费状态: free, paid
+    paymentStatus: varchar("payment_status", { length: 20 }).default("free").notNull(),
+    // 付费类型: domestic（国内9.9元）, international（国际$3）
+    paymentType: varchar("payment_type", { length: 20 }),
+    // 付费时间
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    // 付费到期时间（买断制可为空）
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("users_fingerprint_idx").on(table.deviceFingerprint),
+    index("users_payment_status_idx").on(table.paymentStatus),
+  ]
+);
+
+// 功能体验次数表
+export const featureTrials = pgTable(
+  "feature_trials",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    // 用户ID
+    userId: varchar("user_id", { length: 36 }).notNull(),
+    // 功能标识
+    // meta_analysis, forest_plot, funnel_plot, quality_assessment, 
+    // export_excel, export_image, network_meta, ai_classification, r_code
+    featureKey: varchar("feature_key", { length: 50 }).notNull(),
+    // 已使用次数
+    usedCount: integer("used_count").default(0).notNull(),
+    // 最大免费次数（默认1次）
+    maxFreeCount: integer("max_free_count").default(1).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("feature_trials_user_idx").on(table.userId),
+    index("feature_trials_feature_idx").on(table.featureKey),
+    // 确保每个用户每个功能只有一条记录
+    index("feature_trials_user_feature_idx").on(table.userId, table.featureKey),
+  ]
+);
+
+// 支付订单表
+export const paymentOrders = pgTable(
+  "payment_orders",
+  {
+    id: varchar("id", { length: 36 })
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    // 用户ID
+    userId: varchar("user_id", { length: 36 }).notNull(),
+    // 订单号
+    orderNo: varchar("order_no", { length: 64 }).notNull().unique(),
+    // 支付方式: wechat, alipay, stripe
+    paymentMethod: varchar("payment_method", { length: 20 }).notNull(),
+    // 支付类型: domestic（国内9.9元）, international（国际$3）
+    paymentType: varchar("payment_type", { length: 20 }).notNull(),
+    // 金额（分）
+    amount: integer("amount").notNull(),
+    // 货币: CNY, USD
+    currency: varchar("currency", { length: 10 }).default("CNY").notNull(),
+    // 订单状态: pending, paid, failed, refunded
+    status: varchar("status", { length: 20 }).default("pending").notNull(),
+    // 第三方支付订单号
+    transactionId: varchar("transaction_id", { length: 128 }),
+    // 支付时间
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    // 支付元数据（JSON）
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("payment_orders_user_idx").on(table.userId),
+    index("payment_orders_order_no_idx").on(table.orderNo),
+    index("payment_orders_status_idx").on(table.status),
+    index("payment_orders_transaction_idx").on(table.transactionId),
+  ]
+);
+
+// 用户类型
+export type User = typeof users.$inferSelect;
+export type FeatureTrial = typeof featureTrials.$inferSelect;
+export type PaymentOrder = typeof paymentOrders.$inferSelect;

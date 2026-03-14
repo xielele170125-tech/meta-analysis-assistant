@@ -33,11 +33,13 @@ import {
 } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet, Code2, TriangleAlert, TrendingUp, Search, GitCompare, Info, RefreshCw, ClipboardCheck, Star, AlertTriangle, CheckCircle2, Layers, FolderTree, Plus, X, Lightbulb, Sparkles, Clipboard, FileDigit, ChevronDown, Play, Network } from 'lucide-react';
+import { FileText, Upload, Database, BarChart3, Settings, Loader2, Trash2, Eye, CheckCircle, XCircle, Clock, AlertCircle, Brain, FileUp, Download, FileSpreadsheet, Code2, TriangleAlert, TrendingUp, Search, GitCompare, Info, RefreshCw, ClipboardCheck, Star, AlertTriangle, CheckCircle2, Layers, FolderTree, Plus, X, Lightbulb, Sparkles, Clipboard, FileDigit, ChevronDown, Play, Network, Crown } from 'lucide-react';
 import QualityAssessmentTable from '@/components/QualityAssessmentTable';
 import NetworkAnalysisTab from '@/components/NetworkAnalysisTab';
 import DimensionDataFilter from '@/components/DimensionDataFilter';
 import { LLMConfigManager } from '@/components/LLMConfigManager';
+import { usePayment, useFeatureAccess, FeatureKey } from '@/contexts/PaymentContext';
+import { PaymentStatusBadge } from '@/components/PaymentStatusBadge';
 
 // 类型定义
 interface Literature {
@@ -193,6 +195,19 @@ interface RCodeResult {
 }
 
 export default function Home() {
+  // 付费系统
+  const payment = usePayment();
+  const { isPaid, loading: paymentLoading, showPaymentModal } = payment;
+  
+  // 功能访问控制
+  const metaAnalysisAccess = useFeatureAccess('meta_analysis');
+  const qualityAssessmentAccess = useFeatureAccess('quality_assessment');
+  const exportExcelAccess = useFeatureAccess('export_excel');
+  const exportImageAccess = useFeatureAccess('export_image');
+  const rCodeAccess = useFeatureAccess('r_code');
+  const networkMetaAccess = useFeatureAccess('network_meta');
+  const aiClassificationAccess = useFeatureAccess('ai_classification');
+  
   const [apiKey, setApiKey] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [activeTab, setActiveTab] = useState('literature');
@@ -555,6 +570,12 @@ export default function Home() {
 
   // 批量执行多个维度的AI分类
   const batchClassifyDimensions = async () => {
+    // 检查付费权限
+    if (!isPaid) {
+      const canUse = await aiClassificationAccess.useAccess();
+      if (!canUse) return;
+    }
+    
     if (selectedDimensionsForBatch.length === 0) {
       alert('请至少选择一个分类维度');
       return;
@@ -1261,6 +1282,12 @@ export default function Home() {
 
   // 批量质量评分
   const batchAssessQuality = async (scaleType: 'rob2' | 'nos') => {
+    // 检查付费权限
+    if (!isPaid) {
+      const canUse = await qualityAssessmentAccess.useAccess();
+      if (!canUse) return;
+    }
+    
     if (!apiKey) {
       alert('请先设置 DeepSeek API Key');
       return;
@@ -1553,6 +1580,12 @@ export default function Home() {
   };
 
   const createAnalysis = async () => {
+    // 检查付费权限
+    if (!isPaid) {
+      const canUse = await metaAnalysisAccess.useAccess();
+      if (!canUse) return;
+    }
+    
     if (selectedStudies.length < 2) {
       alert('请至少选择2项研究进行分析');
       return;
@@ -1638,6 +1671,12 @@ export default function Home() {
 
   // 导出Excel
   const exportExcel = async (analysisId?: string) => {
+    // 检查付费权限
+    if (!isPaid) {
+      const canUse = await exportExcelAccess.useAccess();
+      if (!canUse) return;
+    }
+    
     setExportingExcel(true);
     try {
       const url = analysisId 
@@ -1666,6 +1705,12 @@ export default function Home() {
 
   // 生成R代码
   const generateRCode = async (analysisId: string) => {
+    // 检查付费权限
+    if (!isPaid) {
+      const canUse = await rCodeAccess.useAccess();
+      if (!canUse) return;
+    }
+    
     try {
       const res = await fetch(`/api/export/r-code?analysisId=${analysisId}`);
       const data = await res.json();
@@ -1683,6 +1728,13 @@ export default function Home() {
 
   // 加载漏斗图数据
   const loadFunnelPlot = async (analysisId: string) => {
+    // 检查付费权限
+    if (!isPaid) {
+      const funnelPlotAccess = useFeatureAccess('funnel_plot');
+      const canUse = await funnelPlotAccess.useAccess();
+      if (!canUse) return;
+    }
+    
     setLoadingFunnelPlot(analysisId);
     try {
       const res = await fetch(`/api/analysis/funnel-plot?analysisId=${analysisId}`);
@@ -1740,6 +1792,7 @@ export default function Home() {
                 <Brain className="h-3 w-3" /> DeepSeek 已配置
               </Badge>
             )}
+            <PaymentStatusBadge />
             <Button variant="ghost" size="icon" onClick={() => setShowSettings(!showSettings)}>
               <Settings className="h-5 w-5" />
             </Button>
