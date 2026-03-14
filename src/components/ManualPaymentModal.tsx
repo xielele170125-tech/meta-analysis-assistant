@@ -106,10 +106,12 @@ export function ManualPaymentModal({
     }
   };
 
-  // 收款码图片（优先使用 PNG，如果不存在则使用 SVG 占位图）
+  // 收款码图片配置
+  // 使用方法：将你的收款码保存为 public/payment/wechat-qr.png 或 alipay-qr.png
+  // 系统会自动加载，如果不存在则显示占位图
   const qrCodeUrl = paymentMethod === 'wechat' 
-    ? '/payment/wechat-qr.svg'  // 替换为 wechat-qr.png
-    : '/payment/alipay-qr.svg';  // 替换为 alipay-qr.png
+    ? '/payment/wechat-qr.png'
+    : '/payment/alipay-qr.png';
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
