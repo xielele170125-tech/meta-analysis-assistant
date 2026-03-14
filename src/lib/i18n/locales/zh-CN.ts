@@ -335,6 +335,14 @@ export const zhCN = {
     testSuccess: '模拟支付成功',
     testMode: '[测试] 模拟支付成功',
     openInNew: '在新窗口打开支付页面',
+    manual: {
+      desc: '扫码付款后提交支付凭证，我们将在24小时内确认并解锁功能',
+      paymentInfo: '支付信息',
+      paymentInfoPlaceholder: '请填写转账金额、时间等信息，或上传支付截图链接',
+      contact: '联系方式（选填）',
+      contactPlaceholder: '微信/QQ/邮箱，方便联系您',
+      submit: '提交支付凭证',
+    },
   },
 
   // 设置
