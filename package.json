@@ -95,6 +95,11 @@
   "pnpm": {
     "overrides": {
       "esbuild": "^0.25.12"
-    }
+    },
+    "supportedArchitectures": {
+      "os": ["linux", "darwin", "win32"],
+      "cpu": ["x64", "arm64"]
+    },
+    "neverBuiltDependencies": ["canvas"]
   }
 }
