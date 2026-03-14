@@ -96,22 +96,22 @@ export function PaymentModal({
     setPayUrl(null);
     
     try {
-      // 国内支付使用 XorPay
+      // 国内支付使用免签支付
       if (paymentType === 'domestic') {
-        const response = await fetch('/api/payment/xorpay/create', {
+        const response = await fetch('/api/payment/mianqian/create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             deviceFingerprint,
-            paymentMethod,
+            paymentMethod: paymentMethod === 'wechat' ? 'wxpay' : 'alipay',
           }),
         });
 
         const data = await response.json();
         if (data.success) {
           setOrderNo(data.order.orderNo);
-          setQrCodeUrl(data.payment.qrcode);
-          setPayUrl(data.payment.url);
+          setQrCodeUrl(data.payment.qrCode);
+          setPayUrl(data.payment.payUrl);
           setPolling(true);
         } else {
           alert(data.error || data.message || '创建订单失败');
@@ -132,7 +132,7 @@ export function PaymentModal({
         const data = await response.json();
         if (data.success) {
           setOrderNo(data.order.orderNo);
-          setPayUrl(data.paymentInfo.redirectUrl);
+          setPayUrl(data.paymentInfo?.redirectUrl);
           setPolling(true);
         } else {
           alert(data.message || '创建订单失败');
