@@ -10,15 +10,14 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { 
   Crown, 
   Check, 
   Loader2, 
   CreditCard, 
   Globe, 
-  ExternalLink
+  ExternalLink,
+  RefreshCw
 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n/context';
 
@@ -41,6 +40,7 @@ export function PaymentModal({
   const [paymentType, setPaymentType] = useState<'domestic' | 'international'>('domestic');
   const [paymentMethod, setPaymentMethod] = useState<'wechat' | 'alipay'>('alipay');
   const [loading, setLoading] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [orderNo, setOrderNo] = useState<string>('');
   const [payUrl, setPayUrl] = useState<string>('');
 
@@ -76,10 +76,11 @@ export function PaymentModal({
     }
   };
 
-  // 检查支付状态
+  // 检查支付状态（主动查询易支付）
   const checkPaymentStatus = async () => {
     if (!orderNo) return;
     
+    setVerifying(true);
     try {
       const response = await fetch('/api/payment/verify', {
         method: 'POST',
@@ -96,10 +97,13 @@ export function PaymentModal({
         onPaymentSuccess?.();
         onOpenChange(false);
       } else {
-        alert('暂未检测到支付，支付成功后会自动解锁');
+        alert(data.message || '暂未检测到支付，请支付后再次检查');
       }
     } catch (error) {
       console.error('检查支付状态失败:', error);
+      alert('检查失败，请稍后重试');
+    } finally {
+      setVerifying(false);
     }
   };
 
@@ -198,11 +202,26 @@ export function PaymentModal({
                       前往支付页面
                     </a>
                   </Button>
-                  <Button variant="outline" className="w-full" onClick={checkPaymentStatus}>
-                    已支付？检查支付状态
+                  <Button 
+                    variant="outline" 
+                    className="w-full" 
+                    onClick={checkPaymentStatus}
+                    disabled={verifying}
+                  >
+                    {verifying ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        检查中...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        已支付？点击检查状态
+                      </>
+                    )}
                   </Button>
                   <p className="text-xs text-center text-muted-foreground">
-                    支付成功后会自动解锁，也可刷新页面查看
+                    支付完成后点击上方按钮，系统会自动查询并解锁
                   </p>
                 </div>
               ) : (
@@ -233,7 +252,7 @@ export function PaymentModal({
           {/* 自动解锁提示 */}
           <div className="flex items-center gap-2 text-xs text-muted-foreground justify-center">
             <Check className="h-3 w-3 text-green-500" />
-            <span>支付成功后自动解锁，无需等待审核</span>
+            <span>支付成功后点击检查按钮，自动解锁功能</span>
           </div>
         </div>
       </DialogContent>

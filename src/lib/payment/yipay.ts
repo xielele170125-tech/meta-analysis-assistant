@@ -30,6 +30,15 @@ export interface YiPayResult {
   error?: string;
 }
 
+// 订单查询结果
+export interface YiPayOrderQueryResult {
+  success: boolean;
+  status?: 'pending' | 'paid' | 'failed';
+  tradeNo?: string;
+  money?: string;
+  error?: string;
+}
+
 /**
  * 生成签名
  */
@@ -109,6 +118,87 @@ export function createYiPayOrder(
     return {
       success: false,
       error: '创建支付订单失败',
+    };
+  }
+}
+
+/**
+ * 查询订单状态
+ * 主动查询支付结果，不依赖回调通知
+ */
+export async function queryYiPayOrder(
+  config: YiPayConfig,
+  orderNo: string,
+  paymentType: 'alipay' | 'wxpay' = 'alipay'
+): Promise<YiPayOrderQueryResult> {
+  try {
+    // 构建查询参数
+    const params: Record<string, string> = {
+      pid: config.pid,
+      key: config.key,
+      type: paymentType,
+      out_trade_no: orderNo,
+    };
+    
+    // 构建查询URL
+    const queryString = Object.entries(params)
+      .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+      .join('&');
+    
+    const queryUrl = `${config.apiUrl}/api/findorder?${queryString}`;
+    
+    console.log('[易支付] 查询订单:', queryUrl);
+    
+    // 发送请求
+    const response = await fetch(queryUrl, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+      },
+    });
+    
+    const text = await response.text();
+    console.log('[易支付] 查询结果:', text);
+    
+    // 尝试解析JSON
+    try {
+      const data = JSON.parse(text);
+      
+      // 检查支付状态
+      if (data.status === '1' || data.trade_status === 'TRADE_SUCCESS') {
+        return {
+          success: true,
+          status: 'paid',
+          tradeNo: data.trade_no,
+          money: data.money,
+        };
+      } else if (data.status === '0') {
+        return {
+          success: true,
+          status: 'pending',
+        };
+      } else {
+        return {
+          success: false,
+          status: 'pending',
+          error: data.msg || '订单未支付',
+        };
+      }
+    } catch {
+      // 如果返回的不是JSON，可能是HTML错误页面
+      return {
+        success: false,
+        status: 'pending',
+        error: '查询失败',
+      };
+    }
+    
+  } catch (error) {
+    console.error('[易支付] 查询订单失败:', error);
+    return {
+      success: false,
+      status: 'pending',
+      error: '查询失败',
     };
   }
 }
