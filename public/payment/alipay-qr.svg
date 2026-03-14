@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
+  <rect fill="#1677FF" width="300" height="300" rx="16"/>
+  <text x="150" y="130" text-anchor="middle" fill="white" font-size="24" font-family="system-ui">支付宝收款码</text>
+  <text x="150" y="170" text-anchor="middle" fill="white" font-size="14" font-family="system-ui">请替换为你的收款码</text>
+  <rect x="75" y="190" width="150" height="150" fill="white" rx="8"/>
+  <text x="150" y="270" text-anchor="middle" fill="#1677FF" font-size="12">放置 alipay-qr.png</text>
+</svg>

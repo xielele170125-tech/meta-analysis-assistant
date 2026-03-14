@@ -106,10 +106,10 @@ export function ManualPaymentModal({
     }
   };
 
-  // 收款码图片
+  // 收款码图片（优先使用 PNG，如果不存在则使用 SVG 占位图）
   const qrCodeUrl = paymentMethod === 'wechat' 
-    ? '/payment/wechat-qr.png'  // 需要你放置微信收款码图片
-    : '/payment/alipay-qr.png';  // 需要你放置支付宝收款码图片
+    ? '/payment/wechat-qr.svg'  // 替换为 wechat-qr.png
+    : '/payment/alipay-qr.svg';  // 替换为 alipay-qr.png
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

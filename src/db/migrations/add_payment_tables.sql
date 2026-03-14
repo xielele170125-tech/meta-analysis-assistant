@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS users (
   email VARCHAR(255),
   payment_status VARCHAR(20) NOT NULL DEFAULT 'free',
   payment_type VARCHAR(20),
+  is_paid BOOLEAN DEFAULT false,
   paid_at TIMESTAMP WITH TIME ZONE,
   expires_at TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
@@ -22,6 +23,7 @@ CREATE INDEX IF NOT EXISTS users_payment_status_idx ON users(payment_status);
 CREATE TABLE IF NOT EXISTS feature_trials (
   id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  device_fingerprint VARCHAR(64) NOT NULL,
   feature_key VARCHAR(50) NOT NULL,
   used_count INTEGER NOT NULL DEFAULT 0,
   max_free_count INTEGER NOT NULL DEFAULT 1,
@@ -33,11 +35,13 @@ CREATE TABLE IF NOT EXISTS feature_trials (
 CREATE INDEX IF NOT EXISTS feature_trials_user_idx ON feature_trials(user_id);
 CREATE INDEX IF NOT EXISTS feature_trials_feature_idx ON feature_trials(feature_key);
 CREATE INDEX IF NOT EXISTS feature_trials_user_feature_idx ON feature_trials(user_id, feature_key);
+CREATE INDEX IF NOT EXISTS feature_trials_device_idx ON feature_trials(device_fingerprint);
 
 -- 支付订单表
 CREATE TABLE IF NOT EXISTS payment_orders (
   id VARCHAR(36) PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id VARCHAR(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id VARCHAR(36) REFERENCES users(id) ON DELETE SET NULL,
+  device_fingerprint VARCHAR(64) NOT NULL,
   order_no VARCHAR(64) NOT NULL UNIQUE,
   payment_method VARCHAR(20) NOT NULL,
   payment_type VARCHAR(20) NOT NULL,
