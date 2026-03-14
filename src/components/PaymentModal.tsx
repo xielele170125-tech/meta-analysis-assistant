@@ -66,11 +66,16 @@ export function PaymentModal({
         // 直接跳转到支付页面
         window.open(data.payment.payUrl, '_blank');
       } else {
-        alert(data.error || data.message || '创建订单失败');
+        // 显示详细错误信息
+        const errorMsg = data.detail 
+          ? `${data.error}: ${data.detail}` 
+          : (data.error || data.message || '创建订单失败');
+        alert(errorMsg);
+        console.error('创建订单失败详情:', data);
       }
     } catch (error) {
       console.error('创建支付订单失败:', error);
-      alert('创建支付订单失败');
+      alert('创建支付订单失败，请稍后重试');
     } finally {
       setLoading(false);
     }

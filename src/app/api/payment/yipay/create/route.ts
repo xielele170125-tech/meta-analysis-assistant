@@ -128,9 +128,18 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (orderError) {
-      console.error('创建订单失败:', orderError);
+      console.error('创建本地订单失败:', {
+        code: orderError.code,
+        message: orderError.message,
+        details: orderError.details,
+        hint: orderError.hint,
+      });
       return NextResponse.json(
-        { error: '创建订单失败' },
+        { 
+          error: '创建订单失败',
+          detail: orderError.message,
+          code: orderError.code,
+        },
         { status: 500 }
       );
     }
