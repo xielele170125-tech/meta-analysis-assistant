@@ -14,6 +14,8 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  // 配置Turbopack（Next.js 16默认）
+  turbopack: {},
   webpack: (config, { isServer }) => {
     // 忽略 canvas 模块（pdfjs-dist 的可选依赖）
     if (isServer) {
