@@ -96,14 +96,14 @@ export function PaymentModal({
     setPayUrl(null);
     
     try {
-      // 国内支付使用免签支付
+      // 国内支付使用虎皮椒
       if (paymentType === 'domestic') {
-        const response = await fetch('/api/payment/mianqian/create', {
+        const response = await fetch('/api/payment/hupijiao/create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             deviceFingerprint,
-            paymentMethod: paymentMethod === 'wechat' ? 'wxpay' : 'alipay',
+            paymentMethod,
           }),
         });
 
@@ -111,7 +111,7 @@ export function PaymentModal({
         if (data.success) {
           setOrderNo(data.order.orderNo);
           setQrCodeUrl(data.payment.qrCode);
-          setPayUrl(data.payment.payUrl);
+          setPayUrl(data.payment.url);
           setPolling(true);
         } else {
           alert(data.error || data.message || '创建订单失败');
