@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { PaymentWrapper } from '@/components/PaymentWrapper';
+import { I18nProvider } from '@/lib/i18n/context';
 
 export const metadata: Metadata = {
   title: {
@@ -43,9 +44,11 @@ export default function RootLayout({
   return (
     <html lang="zh" suppressHydrationWarning>
       <body className="antialiased">
-        <PaymentWrapper>
-          {children}
-        </PaymentWrapper>
+        <I18nProvider>
+          <PaymentWrapper>
+            {children}
+          </PaymentWrapper>
+        </I18nProvider>
       </body>
     </html>
   );

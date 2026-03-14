@@ -1,0 +1,367 @@
+// 简体中文翻译
+export const zhCN = {
+  // 通用
+  common: {
+    loading: '加载中...',
+    error: '错误',
+    success: '成功',
+    cancel: '取消',
+    confirm: '确认',
+    save: '保存',
+    delete: '删除',
+    edit: '编辑',
+    add: '添加',
+    search: '搜索',
+    reset: '重置',
+    close: '关闭',
+    back: '返回',
+    next: '下一步',
+    previous: '上一步',
+    submit: '提交',
+    download: '下载',
+    upload: '上传',
+    export: '导出',
+    import: '导入',
+    copy: '复制',
+    copied: '已复制',
+    more: '更多',
+    all: '全部',
+    none: '无',
+    yes: '是',
+    no: '否',
+    or: '或',
+    and: '和',
+    pleaseSelect: '请选择',
+    pleaseInput: '请输入',
+    noData: '暂无数据',
+    tip: '提示',
+    warning: '警告',
+    info: '信息',
+    configured: '已配置',
+  },
+
+  // 导航和标题
+  nav: {
+    home: '首页',
+    literature: '文献管理',
+    data: '数据提取',
+    analysis: 'Meta分析',
+    quality: '质量评分',
+    classification: '文献分类',
+    network: '网状分析',
+    settings: '设置',
+    help: '帮助',
+  },
+
+  // 应用标题
+  app: {
+    title: 'Meta分析助手',
+    subtitle: '文献数据提取与Meta分析工具',
+    description: '基于AI的文献Meta分析智能体，支持自动数据提取和可视化分析',
+  },
+
+  // 文献管理
+  literature: {
+    title: '文献管理',
+    upload: '上传文献',
+    uploadPdf: '上传PDF',
+    uploadRis: '上传RIS/EndNote',
+    pasteImport: '粘贴导入',
+    importFromDoi: 'DOI导入',
+    search: '检索文献',
+    list: '文献列表',
+    details: '文献详情',
+    status: {
+      pending: '待处理',
+      parsing: '解析中',
+      extracting: '提取中',
+      completed: '已完成',
+      failed: '失败',
+    },
+    actions: {
+      view: '查看',
+      delete: '删除',
+      reprocess: '重新处理',
+      download: '下载',
+      attachPdf: '关联PDF',
+    },
+    columns: {
+      title: '标题',
+      authors: '作者',
+      year: '年份',
+      journal: '期刊',
+      doi: 'DOI',
+      status: '状态',
+      actions: '操作',
+    },
+    messages: {
+      uploadSuccess: '上传成功',
+      uploadFailed: '上传失败',
+      deleteConfirm: '确定要删除这篇文献吗？',
+      deleteSuccess: '删除成功',
+      noSelected: '请选择文献',
+      processing: '正在处理中...',
+    },
+  },
+
+  // 文献检索
+  search: {
+    title: '文献检索',
+    researchQuestion: '研究问题',
+    researchQuestionPlaceholder: '请输入您的研究问题，例如：咖啡摄入与2型糖尿病风险的关系',
+    generateQuery: '生成检索式',
+    searchStrategy: '检索策略',
+    strategies: {
+      core: '核心概念',
+      sensitive: '敏感性检索',
+      filtered: '研究类型限定',
+    },
+    database: '数据库',
+    databases: {
+      pubmed: 'PubMed',
+      embase: 'EMBASE',
+      cochrane: 'Cochrane',
+      webofscience: 'Web of Science',
+    },
+    results: '检索结果',
+    noResults: '无检索结果',
+    screening: 'AI初筛',
+    screeningResult: '初筛结果',
+    included: '纳入',
+    excluded: '排除',
+    uncertain: '不确定',
+    messages: {
+      generating: '正在生成检索式...',
+      searching: '正在检索...',
+      screening: '正在AI初筛...',
+    },
+  },
+
+  // 数据提取
+  data: {
+    title: '数据提取',
+    extractedData: '提取的数据',
+    selectStudies: '选择研究',
+    noData: '暂无提取的数据',
+    columns: {
+      studyName: '研究名称',
+      sampleSize: '样本量',
+      mean: '均值',
+      sd: '标准差',
+      events: '事件数',
+      effectSize: '效应量',
+      ci: '置信区间',
+      outcome: '结局类型',
+      subgroup: '亚组',
+    },
+    outcomeTypes: {
+      continuous: '连续变量',
+      binary: '二分类变量',
+    },
+    effectMeasures: {
+      smd: '标准化均数差(SMD)',
+      md: '均数差(MD)',
+      or: '比值比(OR)',
+      rr: '相对风险(RR)',
+      hr: '风险比(HR)',
+    },
+  },
+
+  // Meta分析
+  analysis: {
+    title: 'Meta分析',
+    create: '创建分析',
+    name: '分析名称',
+    description: '描述',
+    modelType: '模型类型',
+    models: {
+      fixed: '固定效应模型',
+      random: '随机效应模型',
+    },
+    result: '分析结果',
+    combinedEffect: '合并效应量',
+    heterogeneity: '异质性',
+    i2: 'I²',
+    tau2: 'τ²',
+    pValue: 'P值',
+    ci: '95% CI',
+    forestPlot: '森林图',
+    funnelPlot: '漏斗图',
+    eggerTest: 'Egger检验',
+    beggTest: 'Begg检验',
+    publicationBias: '发表偏倚',
+    messages: {
+      selectAtLeast: '请至少选择{count}项研究',
+      creating: '正在创建分析...',
+      created: '分析创建成功',
+    },
+  },
+
+  // 质量评分
+  quality: {
+    title: '质量评分',
+    scale: '量表',
+    scales: {
+      rob2: 'Cochrane RoB 2.0 (RCT)',
+      nos: 'Newcastle-Ottawa (观察性研究)',
+      quadas2: 'QUADAS-2 (诊断研究)',
+    },
+    overallRisk: '总体偏倚风险',
+    risk: {
+      low: '低风险',
+      someConcerns: '一些顾虑',
+      high: '高风险',
+    },
+    domains: {
+      d1: '随机化过程',
+      d2: '偏离预期干预',
+      d3: '结局数据缺失',
+      d4: '结局测量',
+      d5: '结果报告选择性',
+    },
+    batchAssess: '批量评分',
+    exportTable: '导出表格',
+    messages: {
+      assessing: '正在评估...',
+      assessed: '评估完成',
+    },
+  },
+
+  // 文献分类
+  classification: {
+    title: '文献分类',
+    dimension: '分类维度',
+    dimensions: '分类维度',
+    createDimension: '创建维度',
+    editDimension: '编辑维度',
+    deleteDimension: '删除维度',
+    category: '分类',
+    categories: '分类类别',
+    aiClassify: 'AI分类',
+    batchClassify: '批量分类',
+    recommendDimensions: 'AI推荐维度',
+    messages: {
+      classifying: '正在分类...',
+      classified: '分类完成',
+      noDimension: '请先创建分类维度',
+    },
+  },
+
+  // 网状Meta分析
+  network: {
+    title: '网状Meta分析',
+    createAnalysis: '创建网状分析',
+    interventions: '干预措施',
+    comparisons: '比较',
+    sucra: 'SUCRA排名',
+    leagueTable: '联赛表',
+    networkPlot: '网络图',
+    consistency: '一致性检验',
+    directEffect: '直接效应',
+    indirectEffect: '间接效应',
+    inconsistent: '不一致',
+    consistent: '一致',
+  },
+
+  // 导出
+  export: {
+    title: '导出',
+    excel: '导出Excel',
+    image: '导出图片',
+    rCode: '生成R代码',
+    word: '导出Word',
+    ris: '导出RIS',
+    messages: {
+      exporting: '正在导出...',
+      exported: '导出成功',
+    },
+  },
+
+  // 付费系统
+  payment: {
+    unlock: '解锁完整功能',
+    lifetime: '终身使用',
+    oneTime: '一次购买，永久有效',
+    pricing: {
+      domestic: '¥9.9',
+      international: '$3.00',
+    },
+    methods: {
+      wechat: '微信支付',
+      alipay: '支付宝',
+      stripe: 'Stripe',
+    },
+    status: {
+      free: '免费版',
+      paid: '已解锁',
+      pending: '待支付',
+    },
+    features: {
+      unlimitedExtraction: '无限次 AI 数据提取',
+      unlimitedQualityAssessment: '无限次质量评分评估',
+      exportExcel: '导出 Excel 和图片',
+      networkMeta: '网状 Meta 分析',
+      aiClassification: 'AI 智能分类',
+    },
+    trial: {
+      used: '已使用',
+      remaining: '剩余',
+      times: '次',
+      mode: '体验模式',
+      exhausted: '体验次数已用完',
+    },
+    secure: '安全支付',
+    instant: '即时生效',
+    domestic: '国内支付',
+    international: '国际支付',
+    email: '邮箱',
+    emailPlaceholder: 'your@email.com',
+    emailForReceipt: '用于发送收据',
+    payNow: '立即购买',
+    waitingPayment: '等待支付中...',
+    scanQrCode: '请使用{method}扫码支付',
+    orderNo: '订单号',
+    testMode: '[测试] 模拟支付成功',
+  },
+
+  // 设置
+  settings: {
+    title: '系统设置',
+    llmConfig: '模型配置',
+    legacyConfig: '旧版配置',
+    language: '语言',
+    theme: '主题',
+    themes: {
+      light: '浅色',
+      dark: '深色',
+      system: '跟随系统',
+    },
+    apiKey: 'API密钥',
+    apiKeyPlaceholder: '请输入您的API密钥',
+    apiKeyNote: '您的API密钥将安全存储在本地',
+  },
+
+  // 错误消息
+  errors: {
+    generic: '操作失败，请重试',
+    network: '网络错误，请检查网络连接',
+    notFound: '未找到请求的资源',
+    unauthorized: '未授权，请先登录',
+    forbidden: '无权限访问',
+    serverError: '服务器错误',
+    validation: '输入验证失败',
+    fileUpload: '文件上传失败',
+    apiError: 'API调用失败',
+  },
+
+  // 成功消息
+  success: {
+    saved: '保存成功',
+    deleted: '删除成功',
+    uploaded: '上传成功',
+    exported: '导出成功',
+    copied: '复制成功',
+  },
+};
+
+export default zhCN;

@@ -25,6 +25,7 @@ import {
   Zap,
   Sparkles
 } from 'lucide-react';
+import { useTranslation } from '@/lib/i18n/context';
 
 interface PaymentModalProps {
   open: boolean;
@@ -41,6 +42,7 @@ export function PaymentModal({
   deviceFingerprint,
   onPaymentSuccess,
 }: PaymentModalProps) {
+  const { t } = useTranslation();
   const [paymentType, setPaymentType] = useState<'domestic' | 'international'>('domestic');
   const [paymentMethod, setPaymentMethod] = useState<'wechat' | 'alipay' | 'stripe'>('wechat');
   const [email, setEmail] = useState('');
@@ -154,12 +156,12 @@ export function PaymentModal({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Crown className="h-5 w-5 text-yellow-500" />
-            解锁完整功能
+            {t('payment.unlock')}
           </DialogTitle>
           <DialogDescription>
             {featureName 
-              ? `「${featureName}」体验次数已用完，购买解锁全部功能`
-              : '购买解锁所有高级功能，终身使用'
+              ? `「${featureName}」${t('payment.trial.exhausted')}，${t('payment.unlock')}`
+              : t('payment.oneTime')
             }
           </DialogDescription>
         </DialogHeader>
@@ -167,10 +169,10 @@ export function PaymentModal({
         <Tabs value={paymentType} onValueChange={(v) => setPaymentType(v as 'domestic' | 'international')}>
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="domestic" className="flex items-center gap-1">
-              <span>🇨🇳</span> 国内支付
+              <span>🇨🇳</span> {t('payment.domestic')}
             </TabsTrigger>
             <TabsTrigger value="international" className="flex items-center gap-1">
-              <Globe className="h-4 w-4" /> 国际支付
+              <Globe className="h-4 w-4" /> {t('payment.international')}
             </TabsTrigger>
           </TabsList>
 
@@ -178,7 +180,7 @@ export function PaymentModal({
             {/* 价格展示 */}
             <div className="text-center py-4">
               <div className="text-4xl font-bold text-primary">¥9.9</div>
-              <p className="text-muted-foreground text-sm mt-1">终身使用，一次购买永久有效</p>
+              <p className="text-muted-foreground text-sm mt-1">{t('payment.lifetime')}</p>
             </div>
 
             {/* 支付方式选择 */}
@@ -189,7 +191,7 @@ export function PaymentModal({
                 onClick={() => setPaymentMethod('wechat')}
               >
                 <span className="text-xl">💚</span>
-                <span className="text-xs">微信支付</span>
+                <span className="text-xs">{t('payment.wechat')}</span>
               </Button>
               <Button
                 variant={paymentMethod === 'alipay' ? 'default' : 'outline'}
@@ -197,7 +199,7 @@ export function PaymentModal({
                 onClick={() => setPaymentMethod('alipay')}
               >
                 <span className="text-xl">💙</span>
-                <span className="text-xs">支付宝</span>
+                <span className="text-xs">{t('payment.alipay')}</span>
               </Button>
             </div>
 
@@ -205,23 +207,23 @@ export function PaymentModal({
             <div className="space-y-2 text-sm">
               <div className="flex items-center gap-2">
                 <Check className="h-4 w-4 text-green-500" />
-                <span>无限次 AI 数据提取</span>
+                <span>{t('payment.features.extraction')}</span>
               </div>
               <div className="flex items-center gap-2">
                 <Check className="h-4 w-4 text-green-500" />
-                <span>无限次质量评分评估</span>
+                <span>{t('payment.features.quality')}</span>
               </div>
               <div className="flex items-center gap-2">
                 <Check className="h-4 w-4 text-green-500" />
-                <span>导出 Excel 和图片</span>
+                <span>{t('payment.features.export')}</span>
               </div>
               <div className="flex items-center gap-2">
                 <Check className="h-4 w-4 text-green-500" />
-                <span>网状 Meta 分析</span>
+                <span>{t('payment.features.network')}</span>
               </div>
               <div className="flex items-center gap-2">
                 <Check className="h-4 w-4 text-green-500" />
-                <span>AI 智能分类</span>
+                <span>{t('payment.features.ai')}</span>
               </div>
             </div>
 
@@ -231,7 +233,7 @@ export function PaymentModal({
                 onClick={handlePayment}
                 disabled={loading}
               >
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : '立即购买'}
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : t('payment.buyNow')}
               </Button>
             ) : (
               <div className="space-y-3">
@@ -239,15 +241,15 @@ export function PaymentModal({
                   <QrCode className="h-32 w-32 text-muted-foreground" />
                 </div>
                 <p className="text-center text-sm text-muted-foreground">
-                  请使用{paymentMethod === 'wechat' ? '微信' : '支付宝'}扫码支付
+                  {t('payment.scanQR', { method: paymentMethod === 'wechat' ? t('payment.wechat') : t('payment.alipay') })}
                 </p>
                 <p className="text-center text-xs text-muted-foreground">
-                  订单号: {orderNo}
+                  {t('payment.orderNo')}: {orderNo}
                 </p>
                 {polling && (
                   <p className="text-center text-sm text-blue-500">
                     <Loader2 className="h-4 w-4 animate-spin inline mr-1" />
-                    等待支付中...
+                    {t('payment.waiting')}
                   </p>
                 )}
                 {/* 测试按钮 - 生产环境删除 */}
@@ -257,7 +259,7 @@ export function PaymentModal({
                   onClick={handleTestPayment}
                   disabled={loading}
                 >
-                  [测试] 模拟支付成功
+                  [测试] {t('payment.testSuccess')}
                 </Button>
               </div>
             )}
@@ -267,12 +269,12 @@ export function PaymentModal({
             {/* 价格展示 */}
             <div className="text-center py-4">
               <div className="text-4xl font-bold text-primary">$3.00</div>
-              <p className="text-muted-foreground text-sm mt-1">One-time purchase, lifetime access</p>
+              <p className="text-muted-foreground text-sm mt-1">{t('payment.internationalDesc')}</p>
             </div>
 
             {/* 邮箱输入 */}
             <div className="space-y-2">
-              <Label htmlFor="email">Email (for receipt)</Label>
+              <Label htmlFor="email">{t('payment.email')}</Label>
               <div className="relative">
                 <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                 <Input

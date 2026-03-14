@@ -40,6 +40,8 @@ import DimensionDataFilter from '@/components/DimensionDataFilter';
 import { LLMConfigManager } from '@/components/LLMConfigManager';
 import { usePayment, useFeatureAccess, FeatureKey } from '@/contexts/PaymentContext';
 import { PaymentStatusBadge } from '@/components/PaymentStatusBadge';
+import { useTranslation } from '@/lib/i18n/context';
+import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 
 // 类型定义
 interface Literature {
@@ -195,6 +197,9 @@ interface RCodeResult {
 }
 
 export default function Home() {
+  // 国际化
+  const { t, dir } = useTranslation();
+  
   // 付费系统
   const payment = usePayment();
   const { isPaid, loading: paymentLoading, showPaymentModal } = payment;
@@ -1782,17 +1787,18 @@ export default function Home() {
               <FileText className="h-5 w-5 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-slate-900 dark:text-white">Meta分析助手</h1>
-              <p className="text-sm text-slate-500">文献数据提取与Meta分析工具</p>
+              <h1 className="text-xl font-bold text-slate-900 dark:text-white">{t('app.title')}</h1>
+              <p className="text-sm text-slate-500">{t('app.subtitle')}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             {apiKey && (
               <Badge variant="outline" className="gap-1">
-                <Brain className="h-3 w-3" /> DeepSeek 已配置
+                <Brain className="h-3 w-3" /> DeepSeek {t('common.configured')}
               </Badge>
             )}
             <PaymentStatusBadge />
+            <LanguageSwitcher />
             <Button variant="ghost" size="icon" onClick={() => setShowSettings(!showSettings)}>
               <Settings className="h-5 w-5" />
             </Button>
