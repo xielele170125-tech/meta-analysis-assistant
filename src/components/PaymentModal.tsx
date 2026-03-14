@@ -20,7 +20,8 @@ import {
   CreditCard, 
   Globe, 
   Copy,
-  CheckCircle
+  CheckCircle,
+  RefreshCw
 } from 'lucide-react';
 import { useTranslation } from '@/lib/i18n/context';
 
@@ -44,6 +45,7 @@ export function PaymentModal({
   const [paymentMethod, setPaymentMethod] = useState<'wechat' | 'alipay'>('wechat');
   const [step, setStep] = useState<'select' | 'pay' | 'confirm'>('select');
   const [loading, setLoading] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [orderNo, setOrderNo] = useState<string>('');
   const [paymentProof, setPaymentProof] = useState('');
   const [contactInfo, setContactInfo] = useState('');
@@ -72,7 +74,39 @@ export function PaymentModal({
   const handleStartPayment = () => {
     const newOrderNo = generateOrderNo();
     setOrderNo(newOrderNo);
-    setStep('confirm');
+    setStep('pay');
+  };
+
+  // 检测支付状态
+  const handleVerifyPayment = async () => {
+    if (!orderNo) return;
+    
+    setVerifying(true);
+    try {
+      const response = await fetch('/api/payment/auto-verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderNo,
+          deviceFingerprint,
+        }),
+      });
+
+      const data = await response.json();
+      if (data.success && data.isPaid) {
+        alert('支付已确认，功能已解锁！');
+        onPaymentSuccess?.();
+        onOpenChange(false);
+        setStep('select');
+      } else {
+        alert(data.message || '暂未检测到支付，请稍后再试');
+      }
+    } catch (error) {
+      console.error('验证失败:', error);
+      alert('验证失败，请稍后重试');
+    } finally {
+      setVerifying(false);
+    }
   };
 
   // 提交支付确认
@@ -220,7 +254,7 @@ export function PaymentModal({
               </TabsContent>
             </Tabs>
           </div>
-        ) : (
+        ) : step === 'pay' ? (
           <div className="space-y-4">
             {/* 二维码展示 */}
             <div className="flex flex-col items-center gap-3">
@@ -236,18 +270,70 @@ export function PaymentModal({
               </div>
               
               <p className="text-center text-sm text-muted-foreground">
-                请使用{paymentMethod === 'wechat' ? '微信' : '支付宝'}扫码支付 ¥9.9
+                请使用{paymentMethod === 'wechat' ? '微信' : '支付宝'}扫码支付 <strong>¥9.9</strong>
               </p>
 
               {/* 订单号 */}
               <div className="flex items-center gap-2 text-sm">
                 <span className="text-muted-foreground">订单号：</span>
-                <code className="bg-muted px-2 py-1 rounded">{orderNo}</code>
+                <code className="bg-muted px-2 py-1 rounded font-mono">{orderNo}</code>
                 <Button variant="ghost" size="sm" onClick={copyOrderNo}>
                   {copied ? <CheckCircle className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
                 </Button>
               </div>
             </div>
+
+            {/* 重要提示 */}
+            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3 text-sm">
+              <p className="font-medium text-yellow-800 dark:text-yellow-200">💡 支付提示</p>
+              <p className="text-yellow-700 dark:text-yellow-300 mt-1">
+                转账时请在备注中填写订单号：<code className="bg-yellow-100 dark:bg-yellow-800 px-1 rounded">{orderNo}</code>
+              </p>
+            </div>
+
+            {/* 操作按钮 */}
+            <div className="space-y-2">
+              <Button 
+                className="w-full" 
+                variant="default"
+                onClick={handleVerifyPayment}
+                disabled={verifying}
+              >
+                {verifying ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    检测中...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    我已支付，检测支付状态
+                  </>
+                )}
+              </Button>
+              
+              <Button 
+                className="w-full" 
+                variant="outline"
+                onClick={() => setStep('confirm')}
+              >
+                没有自动确认？手动提交
+              </Button>
+              
+              <Button 
+                className="w-full" 
+                variant="ghost"
+                onClick={() => setStep('select')}
+              >
+                返回
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground text-center">
+              如果自动检测失败，请手动填写支付信息
+            </p>
 
             {/* 支付确认表单 */}
             <div className="space-y-3">
@@ -274,7 +360,7 @@ export function PaymentModal({
             </div>
 
             <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setStep('select')} className="flex-1">
+              <Button variant="outline" onClick={() => setStep('pay')} className="flex-1">
                 返回
               </Button>
               <Button onClick={handleSubmitConfirm} disabled={loading} className="flex-1">
@@ -284,7 +370,7 @@ export function PaymentModal({
                     提交中...
                   </>
                 ) : (
-                  '我已支付，提交确认'
+                  '提交确认'
                 )}
               </Button>
             </div>

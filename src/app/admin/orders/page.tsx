@@ -4,12 +4,16 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { 
   CheckCircle, 
   XCircle, 
   Clock, 
   RefreshCw,
-  Shield
+  Shield,
+  Plus,
+  Zap
 } from 'lucide-react';
 
 interface Order {
@@ -36,6 +40,13 @@ export default function AdminOrdersPage() {
   const [loading, setLoading] = useState(true);
   const [adminKey, setAdminKey] = useState('');
   const [authenticated, setAuthenticated] = useState(false);
+  
+  // 快速添加收款
+  const [quickAmount, setQuickAmount] = useState('9.9');
+  const [quickOrderId, setQuickOrderId] = useState('');
+  const [quickPaymentMethod, setQuickPaymentMethod] = useState<'wechat' | 'alipay'>('wechat');
+  const [addingPayment, setAddingPayment] = useState(false);
+  const [showQuickAdd, setShowQuickAdd] = useState(false);
 
   // 获取订单列表
   const fetchOrders = async () => {
@@ -77,7 +88,6 @@ export default function AdminOrdersPage() {
       
       if (data.success) {
         alert(data.message);
-        // 刷新订单列表
         fetchOrders();
       } else {
         alert(data.error || '操作失败');
@@ -85,6 +95,45 @@ export default function AdminOrdersPage() {
     } catch (error) {
       console.error('审核失败:', error);
       alert('审核失败');
+    }
+  };
+
+  // 快速添加收款记录
+  const handleQuickAddPayment = async () => {
+    if (!quickAmount) {
+      alert('请输入金额');
+      return;
+    }
+
+    setAddingPayment(true);
+    try {
+      const response = await fetch('/api/admin/add-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          adminKey,
+          amount: quickAmount,
+          orderId: quickOrderId || undefined,
+          paymentMethod: quickPaymentMethod,
+        }),
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        alert(data.message);
+        if (data.matched) {
+          fetchOrders();
+        }
+        setQuickOrderId('');
+      } else {
+        alert(data.error || '添加失败');
+      }
+    } catch (error) {
+      console.error('添加收款记录失败:', error);
+      alert('添加失败');
+    } finally {
+      setAddingPayment(false);
     }
   };
 
@@ -112,6 +161,7 @@ export default function AdminOrdersPage() {
                 onChange={(e) => setAdminKey(e.target.value)}
                 className="w-full mt-1 px-3 py-2 border rounded-md"
                 placeholder="请输入管理员密钥"
+                onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
               />
             </div>
             <Button className="w-full" onClick={handleLogin}>
@@ -128,11 +178,83 @@ export default function AdminOrdersPage() {
       <div className="max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold">支付订单审核</h1>
-          <Button variant="outline" onClick={fetchOrders}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            刷新
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setShowQuickAdd(!showQuickAdd)}>
+              <Zap className="h-4 w-4 mr-2" />
+              快速添加收款
+            </Button>
+            <Button variant="outline" onClick={fetchOrders}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              刷新
+            </Button>
+          </div>
         </div>
+
+        {/* 快速添加收款记录 */}
+        {showQuickAdd && (
+          <Card className="mb-6 border-green-200 bg-green-50 dark:bg-green-900/20">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Zap className="h-5 w-5 text-green-600" />
+                快速添加收款记录（自动匹配订单）
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <Label>金额</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={quickAmount}
+                    onChange={(e) => setQuickAmount(e.target.value)}
+                    placeholder="9.9"
+                  />
+                </div>
+                <div>
+                  <Label>订单号（可选）</Label>
+                  <Input
+                    value={quickOrderId}
+                    onChange={(e) => setQuickOrderId(e.target.value)}
+                    placeholder="留空自动匹配"
+                  />
+                </div>
+                <div>
+                  <Label>支付方式</Label>
+                  <div className="flex gap-2 mt-2">
+                    <Button
+                      variant={quickPaymentMethod === 'wechat' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setQuickPaymentMethod('wechat')}
+                    >
+                      微信
+                    </Button>
+                    <Button
+                      variant={quickPaymentMethod === 'alipay' ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setQuickPaymentMethod('alipay')}
+                    >
+                      支付宝
+                    </Button>
+                  </div>
+                </div>
+                <div className="flex items-end">
+                  <Button 
+                    className="w-full" 
+                    onClick={handleQuickAddPayment}
+                    disabled={addingPayment}
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    添加并自动匹配
+                  </Button>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground mt-3">
+                添加收款记录后，系统会自动匹配相同金额的待支付订单并解锁用户
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         {loading ? (
           <div className="text-center py-8">加载中...</div>
@@ -141,6 +263,7 @@ export default function AdminOrdersPage() {
             <CardContent className="py-8 text-center text-muted-foreground">
               <Clock className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p>暂无待审核订单</p>
+              <p className="text-sm mt-2">用户支付后，使用上方"快速添加收款"功能可自动确认</p>
             </CardContent>
           </Card>
         ) : (
