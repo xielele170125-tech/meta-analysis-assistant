@@ -38,7 +38,8 @@ import QualityAssessmentTable from '@/components/QualityAssessmentTable';
 import NetworkAnalysisTab from '@/components/NetworkAnalysisTab';
 import DimensionDataFilter from '@/components/DimensionDataFilter';
 import { LLMConfigManager } from '@/components/LLMConfigManager';
-import { usePayment, useFeatureAccess, FeatureKey } from '@/contexts/PaymentContext';
+import { usePayment } from '@/contexts/PaymentContext';
+import { FeatureKey } from '@/components/FeatureGate';
 import { PaymentStatusBadge } from '@/components/PaymentStatusBadge';
 import { useTranslation } from '@/lib/i18n/context';
 import { LanguageSwitcher } from '@/components/LanguageSwitcher';
@@ -200,18 +201,9 @@ export default function Home() {
   // 国际化
   const { t, dir } = useTranslation();
   
-  // 付费系统
-  const payment = usePayment();
-  const { isPaid, loading: paymentLoading, showPaymentModal } = payment;
-  
-  // 功能访问控制
-  const metaAnalysisAccess = useFeatureAccess('meta_analysis');
-  const qualityAssessmentAccess = useFeatureAccess('quality_assessment');
-  const exportExcelAccess = useFeatureAccess('export_excel');
-  const exportImageAccess = useFeatureAccess('export_image');
-  const rCodeAccess = useFeatureAccess('r_code');
-  const networkMetaAccess = useFeatureAccess('network_meta');
-  const aiClassificationAccess = useFeatureAccess('ai_classification');
+  // 所有功能免费开放
+  const isPaid = true;
+  const paymentLoading = false;
   
   const [apiKey, setApiKey] = useState('');
   const [showSettings, setShowSettings] = useState(false);
@@ -575,12 +567,6 @@ export default function Home() {
 
   // 批量执行多个维度的AI分类
   const batchClassifyDimensions = async () => {
-    // 检查付费权限
-    if (!isPaid) {
-      const canUse = await aiClassificationAccess.useAccess();
-      if (!canUse) return;
-    }
-    
     if (selectedDimensionsForBatch.length === 0) {
       alert('请至少选择一个分类维度');
       return;
@@ -1287,12 +1273,6 @@ export default function Home() {
 
   // 批量质量评分
   const batchAssessQuality = async (scaleType: 'rob2' | 'nos') => {
-    // 检查付费权限
-    if (!isPaid) {
-      const canUse = await qualityAssessmentAccess.useAccess();
-      if (!canUse) return;
-    }
-    
     if (!apiKey) {
       alert('请先设置 DeepSeek API Key');
       return;
@@ -1585,12 +1565,6 @@ export default function Home() {
   };
 
   const createAnalysis = async () => {
-    // 检查付费权限
-    if (!isPaid) {
-      const canUse = await metaAnalysisAccess.useAccess();
-      if (!canUse) return;
-    }
-    
     if (selectedStudies.length < 2) {
       alert('请至少选择2项研究进行分析');
       return;
@@ -1676,12 +1650,6 @@ export default function Home() {
 
   // 导出Excel
   const exportExcel = async (analysisId?: string) => {
-    // 检查付费权限
-    if (!isPaid) {
-      const canUse = await exportExcelAccess.useAccess();
-      if (!canUse) return;
-    }
-    
     setExportingExcel(true);
     try {
       const url = analysisId 
@@ -1710,12 +1678,6 @@ export default function Home() {
 
   // 生成R代码
   const generateRCode = async (analysisId: string) => {
-    // 检查付费权限
-    if (!isPaid) {
-      const canUse = await rCodeAccess.useAccess();
-      if (!canUse) return;
-    }
-    
     try {
       const res = await fetch(`/api/export/r-code?analysisId=${analysisId}`);
       const data = await res.json();
@@ -1733,13 +1695,7 @@ export default function Home() {
 
   // 加载漏斗图数据
   const loadFunnelPlot = async (analysisId: string) => {
-    // 检查付费权限
-    if (!isPaid) {
-      const funnelPlotAccess = useFeatureAccess('funnel_plot');
-      const canUse = await funnelPlotAccess.useAccess();
-      if (!canUse) return;
-    }
-    
+    // 所有功能免费开放
     setLoadingFunnelPlot(analysisId);
     try {
       const res = await fetch(`/api/analysis/funnel-plot?analysisId=${analysisId}`);
